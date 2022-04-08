@@ -252,6 +252,7 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
         break;
     case WT_PAGE_ROW_LEAF:
         ret = __wt_rec_row_leaf(session, r, ref, salvage);
+        WT_REC_ASSERT_KEY_CONSISTENT(r)
         break;
     default:
         ret = __wt_illegal_value(session, page->type);
@@ -298,6 +299,7 @@ __reconcile(WT_SESSION_IMPL *session, WT_REF *ref, WT_SALVAGE_COOKIE *salvage, u
         return (ret);
     }
 
+    WT_REC_ASSERT_KEY_CONSISTENT(r)
     /* Wrap up the page reconciliation. Panic on failure. */
     WT_ERR(__rec_write_wrapup(session, r, page));
     __rec_write_page_status(session, r);

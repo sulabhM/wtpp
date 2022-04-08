@@ -678,14 +678,15 @@ __wt_rec_row_leaf(
      */
     if ((ins = WT_SKIP_FIRST(WT_ROW_INSERT_SMALLEST(page))) != NULL)
         WT_RET(__rec_row_leaf_insert(session, r, ins));
-
+    WT_REC_ASSERT_KEY_CONSISTENT(r)
     /*
      * Temporary buffers in which to instantiate any uninstantiated keys or value items we need.
      */
     WT_ERR(__wt_scr_alloc(session, 0, &tmpkey));
-
+    WT_REC_ASSERT_KEY_CONSISTENT(r)
     /* For each entry in the page... */
     WT_ROW_FOREACH (page, rip, i) {
+        WT_REC_ASSERT_KEY_CONSISTENT(r)
         /*
          * The salvage code, on some rare occasions, wants to reconcile a page but skip some leading
          * records on the page. Because the row-store leaf reconciliation function copies keys from
@@ -927,7 +928,7 @@ slow:
 build:
             WT_ERR(__rec_cell_build_leaf_key(session, r, tmpkey->data, tmpkey->size, &ovfl_key));
         }
-
+        WT_REC_ASSERT_KEY_CONSISTENT(r)
         /* Boundary: split or write the page. */
         if (__wt_rec_need_split(r, key->len + val->len)) {
             /*
@@ -951,6 +952,7 @@ build:
             }
 
             WT_ERR(__wt_rec_split_crossing_bnd(session, r, key->len + val->len));
+            WT_REC_ASSERT_KEY_CONSISTENT(r)
         }
 
         /* Copy the key/value pair onto the page. */
@@ -974,9 +976,10 @@ leaf_insert:
             WT_ERR(__rec_row_leaf_insert(session, r, ins));
     }
 
+    WT_REC_ASSERT_KEY_CONSISTENT(r)
     /* Write the remnant page. */
     ret = __wt_rec_split_finish(session, r);
-
+    WT_REC_ASSERT_KEY_CONSISTENT(r)
 err:
     __wt_scr_free(session, &tmpkey);
     return (ret);
