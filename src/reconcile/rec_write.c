@@ -1004,7 +1004,8 @@ __wt_rec_split_init(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page, ui
     WT_BTREE *btree;
     WT_REC_CHUNK *chunk;
     WT_REF *ref;
-    size_t corrected_page_size;
+    size_t corrected_page_size, key_size;
+    void *key;
 
     btree = S2BT(session);
     bm = btree->bm;
@@ -1132,8 +1133,11 @@ __wt_rec_split_init(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_PAGE *page, ui
         ref = r->ref;
         if (__wt_ref_is_root(ref))
             WT_RET(__wt_buf_set(session, &chunk->key, "", 1));
-        else
-            __wt_ref_key(ref->home, ref, &chunk->key.data, &chunk->key.size);
+        else {
+            __wt_ref_key(ref->home, ref, &key, &key_size);
+            WT_RET(__wt_buf_set(session, &chunk->key, key, key_size));
+            //__wt_ref_key(ref->home, ref, &chunk->key.data, &chunk->key.size);
+        }
     } else
         chunk->recno = recno;
 
@@ -2087,9 +2091,10 @@ __rec_split_write(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_CHUNK *chunk
     multi->supd_restore = false;
 
     /* Set the key. */
-    if (btree->type == BTREE_ROW)
+    if (btree->type == BTREE_ROW) {
         WT_RET(__wt_row_ikey_alloc(session, 0, chunk->key.data, chunk->key.size, &multi->key.ikey));
-    else
+        __wt_buf_free(session, &chunk->key);
+    } else
         multi->key.recno = chunk->recno;
 
     /* Check if there are saved updates that might belong to this block. */
