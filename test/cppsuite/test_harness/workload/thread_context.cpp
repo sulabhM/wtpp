@@ -234,8 +234,10 @@ thread_context::update(scoped_cursor &cursor, uint64_t collection_id, const std:
         } else
             testutil_die(ret, "unhandled error while trying to update a key");
     }
-    ret = tracking->save_operation(
-      tracking_operation::INSERT, collection_id, key.c_str(), value.c_str(), ts, op_track_cursor);
+    if (!tracking->custom_tracking()) {
+        default_tracking(collection_id, key, ts, tracking_operation::INSERT, value);
+    }
+    ret = tracking->save_operation(tracking_operation::INSERT, op_track_cursor);
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
@@ -277,8 +279,10 @@ thread_context::insert(scoped_cursor &cursor, uint64_t collection_id, const std:
         } else
             testutil_die(ret, "unhandled error while trying to insert a key");
     }
-    ret = tracking->save_operation(
-      tracking_operation::INSERT, collection_id, key.c_str(), value.c_str(), ts, op_track_cursor);
+    if (!tracking->custom_tracking()) {
+        default_tracking(collection_id, key, ts, tracking_operation::INSERT, value);
+    }
+    ret = tracking->save_operation(tracking_operation::INSERT, op_track_cursor);
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
@@ -296,6 +300,8 @@ thread_context::remove(
   scoped_cursor &cursor, uint64_t collection_id, const std::string &key, wt_timestamp_t ts)
 {
     WT_DECL_RET;
+    const std::string value = "";
+
     testutil_assert(tracking != nullptr);
     testutil_assert(cursor.get() != nullptr);
 
@@ -316,8 +322,10 @@ thread_context::remove(
         } else
             testutil_die(ret, "unhandled error while trying to remove a key");
     }
-    ret = tracking->save_operation(
-      tracking_operation::DELETE_KEY, collection_id, key.c_str(), "", ts, op_track_cursor);
+    if (!tracking->custom_tracking()) {
+        default_tracking(collection_id, key, ts, tracking_operation::DELETE_KEY, value);
+    }
+    ret = tracking->save_operation(tracking_operation::DELETE_KEY, op_track_cursor);
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
@@ -341,4 +349,13 @@ thread_context::running() const
 {
     return (_running);
 }
+
+void
+thread_context::default_tracking(uint64_t collection_id, const std::string &key, wt_timestamp_t ts,
+  tracking_operation operation, const std::string &value)
+{
+    op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
+    op_track_cursor->set_value(op_track_cursor.get(), static_cast<int>(operation), value.c_str());
+}
+
 } // namespace test_harness

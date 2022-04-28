@@ -145,8 +145,13 @@ class thread_context {
      */
     bool remove(
       scoped_cursor &cursor, uint64_t collection_id, const std::string &key, wt_timestamp_t ts = 0);
+
     void sleep();
     bool running() const;
+
+    private:
+    void default_tracking(uint64_t collection_id, const std::string &key, wt_timestamp_t ts,
+      tracking_operation operation, const std::string &value);
 
     public:
     const int64_t collection_count;

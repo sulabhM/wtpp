@@ -68,10 +68,8 @@ class workload_tracking : public component {
     void save_schema_operation(
       const tracking_operation &operation, const uint64_t &collection_id, wt_timestamp_t ts);
 
-    template <typename K, typename V>
     int
-    save_operation(const tracking_operation &operation, const uint64_t &collection_id, const K &key,
-      const V &value, wt_timestamp_t ts, scoped_cursor &op_track_cursor)
+    save_operation(const tracking_operation &operation, scoped_cursor &op_track_cursor)
     {
         WT_DECL_RET;
 
@@ -86,12 +84,12 @@ class workload_tracking : public component {
               "save_operation: invalid operation " + std::to_string(static_cast<int>(operation));
             testutil_die(EINVAL, error_message.c_str());
         } else {
-            op_track_cursor->set_key(op_track_cursor.get(), collection_id, key, ts);
-            op_track_cursor->set_value(op_track_cursor.get(), static_cast<int>(operation), value);
             ret = op_track_cursor->insert(op_track_cursor.get());
         }
         return (ret);
     }
+
+    bool custom_tracking() const;
 
     private:
     scoped_session _session;

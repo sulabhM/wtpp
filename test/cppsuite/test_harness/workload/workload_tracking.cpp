@@ -179,4 +179,10 @@ workload_tracking::save_schema_operation(
         testutil_die(EINVAL, error_message.c_str());
     }
 }
+
+bool
+workload_tracking::custom_tracking() const
+{
+    return _custom_tracking;
+}
 } // namespace test_harness
