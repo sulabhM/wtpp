@@ -74,7 +74,6 @@ class workload_tracking : public component {
       const V &value, wt_timestamp_t ts, scoped_cursor &op_track_cursor)
     {
         WT_DECL_RET;
-        std::string error_message;
 
         if (!_enabled)
             return (0);
@@ -83,7 +82,7 @@ class workload_tracking : public component {
 
         if (operation == tracking_operation::CREATE_COLLECTION ||
           operation == tracking_operation::DELETE_COLLECTION) {
-            error_message =
+            std::string error_message =
               "save_operation: invalid operation " + std::to_string(static_cast<int>(operation));
             testutil_die(EINVAL, error_message.c_str());
         } else {
