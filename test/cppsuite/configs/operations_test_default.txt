@@ -85,8 +85,5 @@ workload_generator=
 ),
 workload_tracking=
 (
-    is_custom=true,
-    tracking_key_format=q,
-    tracking_value_format=q,
     op_rate=5s
 )
