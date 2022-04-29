@@ -68,7 +68,7 @@ class workload_tracking : public component {
     void save_schema_operation(
       const tracking_operation &operation, const uint64_t &collection_id, wt_timestamp_t ts);
 
-    int save_operation(const tracking_operation &operation, scoped_cursor &op_track_cursor);
+    int track_operation(const tracking_operation &operation, scoped_cursor &op_track_cursor);
 
     bool custom_tracking() const;
 
