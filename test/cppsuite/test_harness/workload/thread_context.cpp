@@ -350,12 +350,4 @@ thread_context::running() const
     return (_running);
 }
 
-void
-thread_context::default_tracking(uint64_t collection_id, const std::string &key, wt_timestamp_t ts,
-  tracking_operation operation, const std::string &value)
-{
-    op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
-    op_track_cursor->set_value(op_track_cursor.get(), static_cast<int>(operation), value.c_str());
-}
-
 } // namespace test_harness

@@ -150,8 +150,15 @@ class thread_context {
     bool running() const;
 
     private:
-    void default_tracking(uint64_t collection_id, const std::string &key, wt_timestamp_t ts,
-      tracking_operation operation, const std::string &value);
+    template <typename K, typename V>
+    void
+    default_tracking(uint64_t collection_id, const K &key, wt_timestamp_t ts,
+      tracking_operation operation, const V &value)
+    {
+        op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
+        op_track_cursor->set_value(
+          op_track_cursor.get(), static_cast<int>(operation), value.c_str());
+    }
 
     public:
     const int64_t collection_count;
