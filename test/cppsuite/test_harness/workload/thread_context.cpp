@@ -235,7 +235,7 @@ thread_context::update(scoped_cursor &cursor, uint64_t collection_id, const std:
             testutil_die(ret, "unhandled error while trying to update a key");
     }
     if (!tracking->custom_tracking()) {
-        set_default_tracking_field(collection_id, key, ts, tracking_operation::INSERT, value);
+        set_default_tracking_fields(collection_id, key, ts, tracking_operation::INSERT, value);
     }
     ret = tracking->track_operation(tracking_operation::INSERT, op_track_cursor);
     if (ret != 0) {
@@ -280,7 +280,7 @@ thread_context::insert(scoped_cursor &cursor, uint64_t collection_id, const std:
             testutil_die(ret, "unhandled error while trying to insert a key");
     }
     if (!tracking->custom_tracking()) {
-        set_default_tracking_field(collection_id, key, ts, tracking_operation::INSERT, value);
+        set_default_tracking_fields(collection_id, key, ts, tracking_operation::INSERT, value);
     }
     ret = tracking->track_operation(tracking_operation::INSERT, op_track_cursor);
     if (ret != 0) {
@@ -323,7 +323,7 @@ thread_context::remove(
             testutil_die(ret, "unhandled error while trying to remove a key");
     }
     if (!tracking->custom_tracking()) {
-        set_default_tracking_field(collection_id, key, ts, tracking_operation::DELETE_KEY, value);
+        set_default_tracking_fields(collection_id, key, ts, tracking_operation::DELETE_KEY, value);
     }
     ret = tracking->track_operation(tracking_operation::DELETE_KEY, op_track_cursor);
     if (ret != 0) {

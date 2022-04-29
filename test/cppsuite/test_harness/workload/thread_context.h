@@ -152,7 +152,7 @@ class thread_context {
     private:
     template <typename K, typename V>
     void
-    set_default_tracking_field(uint64_t collection_id, const K &key, wt_timestamp_t ts,
+    set_default_tracking_fields(uint64_t collection_id, const K &key, wt_timestamp_t ts,
       tracking_operation operation, const V &value)
     {
         op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
