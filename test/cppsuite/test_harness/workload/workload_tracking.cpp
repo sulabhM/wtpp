@@ -180,6 +180,28 @@ workload_tracking::save_schema_operation(
     }
 }
 
+int
+workload_tracking::save_operation(
+  const tracking_operation &operation, scoped_cursor &op_track_cursor)
+{
+    WT_DECL_RET;
+
+    if (!_enabled)
+        return (0);
+
+    testutil_assert(op_track_cursor.get() != nullptr);
+
+    if (operation == tracking_operation::CREATE_COLLECTION ||
+      operation == tracking_operation::DELETE_COLLECTION) {
+        std::string error_message =
+          "save_operation: invalid operation " + std::to_string(static_cast<int>(operation));
+        testutil_die(EINVAL, error_message.c_str());
+    } else {
+        ret = op_track_cursor->insert(op_track_cursor.get());
+    }
+    return (ret);
+}
+
 bool
 workload_tracking::custom_tracking() const
 {
