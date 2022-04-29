@@ -53,6 +53,7 @@ populate_worker(thread_context *tc)
         uint64_t j = 0;
         while (j < tc->key_count) {
             tc->transaction.begin();
+            std::cout << "inserting in coll.id " << coll.id << " the key " << j << std::endl;
             if (tc->insert(cursor, coll.id, j)) {
                 if (tc->transaction.commit()) {
                     ++j;

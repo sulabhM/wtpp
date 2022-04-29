@@ -1,0 +1,28 @@
+# Configuration for custom_tracking_validation_example.
+# need to be defined.
+duration_seconds=60,
+cache_size_mb=10,
+workload_generator=
+(
+    populate_config=
+    (
+        collection_count=1,
+        key_count_per_collection=1,
+        key_size=10,
+        thread_count=1,
+        value_size=10
+    ),
+    custom_config=
+    (
+        op_rate=10s,
+        thread_count=1
+    ),
+    insert_config=
+    (
+        op_rate=1s,
+        ops_per_transaction=(max=2,min=2),
+        key_size=10000,
+        thread_count=1,
+        value_size=1000000
+    ),
+)

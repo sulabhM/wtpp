@@ -75,6 +75,7 @@ database::add_collection(uint64_t key_count)
     /* FIX-ME-Test-Framework: This will get removed when we split the model up. */
     _collections.emplace(std::piecewise_construct, std::forward_as_tuple(next_id),
       std::forward_as_tuple(next_id, key_count, collection_name));
+    std::cout << "Creating collection " << collection_name.c_str() << std::endl;
     testutil_check(
       _session->create(_session.get(), collection_name.c_str(), _collection_create_config.c_str()));
     _tracking->save_schema_operation(
