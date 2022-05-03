@@ -45,8 +45,8 @@ class tracking_table_template_1 : public test_harness::workload_tracking {
       const uint64_t &collection_id, const std::string &key, const std::string &value,
       wt_timestamp_t ts, scoped_cursor &op_track_cursor) override final
     {
-        std::cout << "set_tracking_cursor - txn id: " << ((WT_SESSION_IMPL *)tc_session.get())->txn->id
-                  << std::endl;
+        std::cout << "set_tracking_cursor - txn id: "
+                  << ((WT_SESSION_IMPL *)tc_session.get())->txn->id << std::endl;
         std::cout << "set_tracking_cursor - ts: " << ts << std::endl;
         WT_CONNECTION_IMPL *conn = S2C((WT_SESSION_IMPL *)tc_session.get());
         uint64_t cache_size = conn->cache_size;
@@ -176,16 +176,20 @@ class custom_tracking_validation_example : public test_harness::test {
         scoped_session session = connection_manager::instance().create_session();
         scoped_cursor cursor = session.open_scoped_cursor(operation_table_name);
 
+        int cpt = 0;
         while ((ret = cursor->next(cursor.get())) == 0) {
+            ++cpt;
             testutil_check(cursor->get_key(
               cursor.get(), &tracked_collection_id, &tracked_key, &tracked_timestamp));
             testutil_check(cursor->get_value(cursor.get(), &tracked_cache_size));
-            std::cout << "tracked_collection_id: " << tracked_collection_id << std::endl;
-            std::cout << "tracked_key: " << tracked_key << std::endl;
-            std::cout << "tracked_timestamp: " << tracked_timestamp << std::endl;
+            // std::cout << "tracked_collection_id: " << tracked_collection_id << std::endl;
+            // std::cout << "tracked_key: " << tracked_key << std::endl;
+            // std::cout << "tracked_timestamp: " << tracked_timestamp << std::endl;
             std::cout << "tracked_cache_size: " << tracked_cache_size << std::endl;
-
-            std::cout << std::endl;
+            /* Transactions could go through only when the cache size was large enough. */
+            testutil_assert(tracked_cache_size >= 524288000);
         }
+        /* Four records had time to go through. */
+        testutil_assert(cpt == 4);
     }
 };
