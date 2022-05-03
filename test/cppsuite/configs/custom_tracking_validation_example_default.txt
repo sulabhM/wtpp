@@ -20,9 +20,9 @@ workload_generator=
     insert_config=
     (
         op_rate=1s,
-        ops_per_transaction=(max=2,min=2),
+        ops_per_transaction=(max=4,min=4),
         key_size=10000,
-        thread_count=1,
+        thread_count=10,
         value_size=1000000
     ),
 ),
