@@ -1,7 +1,7 @@
 # Configuration for custom_tracking_validation_example.
 # need to be defined.
 duration_seconds=5,
-cache_size_mb=500,
+cache_size_mb=10,
 workload_generator=
 (
     populate_config=
@@ -28,7 +28,6 @@ workload_generator=
 ),
 workload_tracking=
 (
-    is_custom=true,
     tracking_key_format=QSQ,
     tracking_value_format=Q
 )

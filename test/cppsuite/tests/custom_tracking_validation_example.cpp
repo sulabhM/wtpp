@@ -41,22 +41,21 @@ class tracking_table_template_1 : public test_harness::workload_tracking {
     }
 
     void
-    populate_tracking_cursor(scoped_session &tc_session, const tracking_operation &operation,
+    set_tracking_cursor(scoped_session &tc_session, const tracking_operation &operation,
       const uint64_t &collection_id, const std::string &key, const std::string &value,
       wt_timestamp_t ts, scoped_cursor &op_track_cursor) override final
     {
-        std::cout << "HERE" << std::endl;
-        std::cout << "I can write the txn id: " << ((WT_SESSION_IMPL *)tc_session.get())->txn->id
+        std::cout << "set_tracking_cursor - txn id: " << ((WT_SESSION_IMPL *)tc_session.get())->txn->id
                   << std::endl;
-        std::cout << "I can write the ts: " << ts << std::endl;
+        std::cout << "set_tracking_cursor - ts: " << ts << std::endl;
         WT_CONNECTION_IMPL *conn = S2C((WT_SESSION_IMPL *)tc_session.get());
         uint64_t cache_size = conn->cache_size;
-        std::cout << "I can write the cache: " << cache_size << std::endl;
+        std::cout << "set_tracking_cursor - cache: " << cache_size << std::endl;
 
         /* You can replace this call to define your own tracking table contents. */
         op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
         op_track_cursor->set_value(op_track_cursor.get(), cache_size);
-        // workload_tracking::populate_tracking_cursor(
+        // workload_tracking::set_tracking_cursor(
         //   tc_session, operation, collection_id, key, value, ts, op_track_cursor);
     }
 };
@@ -164,7 +163,7 @@ class custom_tracking_validation_example : public test_harness::test {
     }
 
     void
-    validate(bool, const std::string &operation_table_name, const std::string &,
+    validate(const std::string &operation_table_name, const std::string &,
       const std::vector<uint64_t> &) override final
     {
         WT_DECL_RET;

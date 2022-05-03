@@ -35,24 +35,13 @@
 namespace test_harness {
 workload_tracking::workload_tracking(
   configuration *_config, const bool use_compression, timestamp_manager &tsm)
-    : component("workload_tracking", _config), _operation_table_name(TABLE_OPERATION_TRACKING),
+    : component(WORKLOAD_TRACKING, _config), _operation_table_name(TABLE_OPERATION_TRACKING),
       _schema_table_config(SCHEMA_TRACKING_TABLE_CONFIG), _schema_table_name(TABLE_SCHEMA_TRACKING),
-      _custom_tracking(_config->get_bool(IS_CUSTOM)), _use_compression(use_compression), _tsm(tsm)
+      _use_compression(use_compression), _tsm(tsm)
 {
-    bool is_custom = _config->get_bool(IS_CUSTOM);
-    std::cout << "is_custom tracking? " << is_custom << std::endl;
-    if (!_config->get_bool(IS_CUSTOM)) {
-        if (_config->get_string(TRACKING_KEY_FORMAT) != OPERATION_TRACKING_KEY_FORMAT)
-            testutil_die(EINVAL,
-              "Tracking table has a custom key format, but tracking table is not marked as custom");
-        if (_config->get_string(TRACKING_VALUE_FORMAT) != OPERATION_TRACKING_VALUE_FORMAT)
-            testutil_die(EINVAL,
-              "Tracking table has a custom value format, but tracking table is not marked as "
-              "custom");
-    }
-
-    _operation_table_config = "key_format=" + _config->get_string(TRACKING_KEY_FORMAT) +
-      ",value_format=" + _config->get_string(TRACKING_VALUE_FORMAT) +
+    const std::string key_format(_config->get_string(TRACKING_KEY_FORMAT));
+    const std::string value_format(_config->get_string(TRACKING_VALUE_FORMAT));
+    _operation_table_config = "key_format=" + key_format + ",value_format=" + value_format +
       ",log=(enabled=true),write_timestamp_usage=mixed_mode";
 
     std::cout << "_operation_table_config is " << _operation_table_config << std::endl;
@@ -112,9 +101,12 @@ workload_tracking::do_work()
 
     /*
      * This function prunes old data from the tracking table as the default validation logic doesn't
-     * use it. Custom user-defined validation may need this data, so don't allow it to be removed.
+     * use it. User-defined validation may need this data, so don't allow it to be removed.
      */
-    if (_custom_tracking)
+    const std::string key_format(_sweep_cursor->key_format);
+    const std::string value_format(_sweep_cursor->value_format);
+    if (key_format != OPERATION_TRACKING_KEY_FORMAT ||
+      value_format != OPERATION_TRACKING_VALUE_FORMAT)
         return;
 
     key = sweep_key = nullptr;
@@ -203,7 +195,6 @@ workload_tracking::save_operation(scoped_session &tc_session, const tracking_ope
   wt_timestamp_t ts, scoped_cursor &op_track_cursor)
 {
     WT_DECL_RET;
-    std::string error_message;
 
     if (!_enabled)
         return (0);
@@ -212,20 +203,20 @@ workload_tracking::save_operation(scoped_session &tc_session, const tracking_ope
 
     if (operation == tracking_operation::CREATE_COLLECTION ||
       operation == tracking_operation::DELETE_COLLECTION) {
-        error_message =
+        const std::string error_message =
           "save_operation: invalid operation " + std::to_string(static_cast<int>(operation));
         testutil_die(EINVAL, error_message.c_str());
     } else {
-        populate_tracking_cursor(tc_session, operation, collection_id, key, value, ts, op_track_cursor);
+        set_tracking_cursor(tc_session, operation, collection_id, key, value, ts, op_track_cursor);
         ret = op_track_cursor->insert(op_track_cursor.get());
     }
     return (ret);
 }
 
 void
-workload_tracking::populate_tracking_cursor(scoped_session& tc_session, const tracking_operation &operation,
-  const uint64_t &collection_id, const std::string &key, const std::string &value,
-  wt_timestamp_t ts, scoped_cursor &op_track_cursor)
+workload_tracking::set_tracking_cursor(scoped_session &tc_session,
+  const tracking_operation &operation, const uint64_t &collection_id, const std::string &key,
+  const std::string &value, wt_timestamp_t ts, scoped_cursor &op_track_cursor)
 {
     op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
     op_track_cursor->set_value(op_track_cursor.get(), static_cast<int>(operation), value.c_str());

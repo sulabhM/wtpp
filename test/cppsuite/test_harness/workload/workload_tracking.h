@@ -74,13 +74,13 @@ class workload_tracking : public component {
     void save_schema_operation(
       const tracking_operation &operation, const uint64_t &collection_id, wt_timestamp_t ts);
 
-    virtual void populate_tracking_cursor(scoped_session& tc_session, const tracking_operation &operation,
+    virtual void set_tracking_cursor(scoped_session &tc_session,
+      const tracking_operation &operation, const uint64_t &collection_id, const std::string &key,
+      const std::string &value, wt_timestamp_t ts, scoped_cursor &op_track_cursor);
+
+    int save_operation(scoped_session &tc_session, const tracking_operation &operation,
       const uint64_t &collection_id, const std::string &key, const std::string &value,
       wt_timestamp_t ts, scoped_cursor &op_track_cursor);
-
-    int save_operation(scoped_session& tc_session, const tracking_operation &operation, const uint64_t &collection_id,
-      const std::string &key, const std::string &value, wt_timestamp_t ts,
-      scoped_cursor &op_track_cursor);
 
     private:
     scoped_session _session;
@@ -91,7 +91,6 @@ class workload_tracking : public component {
     const std::string _operation_table_name;
     const std::string _schema_table_config;
     const std::string _schema_table_name;
-    const bool _custom_tracking;
     const bool _use_compression;
     timestamp_manager &_tsm;
 };

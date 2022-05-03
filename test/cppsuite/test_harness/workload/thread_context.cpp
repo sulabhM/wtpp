@@ -238,8 +238,8 @@ thread_context::update(scoped_cursor &cursor, uint64_t collection_id, const std:
         } else
             testutil_die(ret, "unhandled error while trying to update a key");
     }
-    ret = tracking->save_operation(session,
-      tracking_operation::INSERT, collection_id, key, value, ts, op_track_cursor);
+    ret = tracking->save_operation(
+      session, tracking_operation::INSERT, collection_id, key, value, ts, op_track_cursor);
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
@@ -284,8 +284,8 @@ thread_context::insert(scoped_cursor &cursor, uint64_t collection_id, const std:
     } else {
         std::cout << "Inserted data!" << std::endl;
     }
-    ret = tracking->save_operation(session,
-      tracking_operation::INSERT, collection_id, key, value, ts, op_track_cursor);
+    ret = tracking->save_operation(
+      session, tracking_operation::INSERT, collection_id, key, value, ts, op_track_cursor);
     std::cout << "save operation ret is " << ret << std::endl;
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
@@ -324,8 +324,8 @@ thread_context::remove(
         } else
             testutil_die(ret, "unhandled error while trying to remove a key");
     }
-    ret = tracking->save_operation(session,
-      tracking_operation::DELETE_KEY, collection_id, key, "", ts, op_track_cursor);
+    ret = tracking->save_operation(
+      session, tracking_operation::DELETE_KEY, collection_id, key, "", ts, op_track_cursor);
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);

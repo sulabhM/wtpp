@@ -40,12 +40,12 @@ class tracking_table_template : public test_harness::workload_tracking {
     }
 
     void
-    populate_tracking_cursor(scoped_session &tc_session, const tracking_operation &operation,
+    set_tracking_cursor(scoped_session &tc_session, const tracking_operation &operation,
       const uint64_t &collection_id, const std::string &key, const std::string &value,
       wt_timestamp_t ts, scoped_cursor &op_track_cursor) override final
     {
         /* You can replace this call to define your own tracking table contents. */
-        workload_tracking::populate_tracking_cursor(
+        workload_tracking::set_tracking_cursor(
           tc_session, operation, collection_id, key, value, ts, op_track_cursor);
     }
 };
@@ -109,8 +109,7 @@ class test_template : public test_harness::test {
     }
 
     void
-    validate(bool custom_tracking_table, const std::string &, const std::string &,
-      const std::vector<uint64_t> &) override final
+    validate(const std::string &, const std::string &, const std::vector<uint64_t> &) override final
     {
         std::cout << "validate: nothing done." << std::endl;
     }
