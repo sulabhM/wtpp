@@ -39,6 +39,8 @@ workload_tracking::workload_tracking(
       _schema_table_config(SCHEMA_TRACKING_TABLE_CONFIG), _schema_table_name(TABLE_SCHEMA_TRACKING),
       _custom_tracking(_config->get_bool(IS_CUSTOM)), _use_compression(use_compression), _tsm(tsm)
 {
+    bool is_custom = _config->get_bool(IS_CUSTOM);
+    std::cout << "is_custom tracking? " << is_custom << std::endl;
     if (!_config->get_bool(IS_CUSTOM)) {
         if (_config->get_string(TRACKING_KEY_FORMAT) != OPERATION_TRACKING_KEY_FORMAT)
             testutil_die(EINVAL,
@@ -52,6 +54,8 @@ workload_tracking::workload_tracking(
     _operation_table_config = "key_format=" + _config->get_string(TRACKING_KEY_FORMAT) +
       ",value_format=" + _config->get_string(TRACKING_VALUE_FORMAT) +
       ",log=(enabled=true),write_timestamp_usage=mixed_mode";
+
+    std::cout << "_operation_table_config is " << _operation_table_config << std::endl;
 }
 
 const std::string &
@@ -194,7 +198,7 @@ workload_tracking::save_schema_operation(
 }
 
 int
-workload_tracking::save_operation(const tracking_operation &operation,
+workload_tracking::save_operation(scoped_session &tc_session, const tracking_operation &operation,
   const uint64_t &collection_id, const std::string &key, const std::string &value,
   wt_timestamp_t ts, scoped_cursor &op_track_cursor)
 {
@@ -212,14 +216,14 @@ workload_tracking::save_operation(const tracking_operation &operation,
           "save_operation: invalid operation " + std::to_string(static_cast<int>(operation));
         testutil_die(EINVAL, error_message.c_str());
     } else {
-        populate_tracking_cursor(operation, collection_id, key, value, ts, op_track_cursor);
+        populate_tracking_cursor(tc_session, operation, collection_id, key, value, ts, op_track_cursor);
         ret = op_track_cursor->insert(op_track_cursor.get());
     }
     return (ret);
 }
 
 void
-workload_tracking::populate_tracking_cursor(const tracking_operation &operation,
+workload_tracking::populate_tracking_cursor(scoped_session& tc_session, const tracking_operation &operation,
   const uint64_t &collection_id, const std::string &key, const std::string &value,
   wt_timestamp_t ts, scoped_cursor &op_track_cursor)
 {

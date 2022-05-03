@@ -125,7 +125,7 @@ static const WT_CONFIG_CHECK confchk_custom_tracking_validation_example[] = {
   {"statistics_config", "category", NULL, NULL, confchk_statistics_config_subconfigs, 2},
   {"timestamp_manager", "category", NULL, NULL, confchk_timestamp_manager_subconfigs, 4},
   {"workload_generator", "category", NULL, NULL, confchk_workload_generator_subconfigs, 8},
-  {"workload_tracking", "category", NULL, NULL, confchk_workload_tracking_subconfigs, 2},
+  {"workload_tracking", "category", NULL, NULL, confchk_workload_tracking_subconfigs, 5},
   {NULL, NULL, NULL, NULL, NULL, 0}};
 
 static const WT_CONFIG_CHECK confchk_hs_cleanup[] = {
@@ -256,7 +256,8 @@ static const WT_CONFIG_ENTRY config_entries[] = {
     "remove_config=(op_rate=1s,ops_per_transaction=(max=1,min=0),"
     "thread_count=0),update_config=(key_size=5,op_rate=1s,"
     "ops_per_transaction=(max=1,min=0),thread_count=0,value_size=5)),"
-    "workload_tracking=(enabled=true,op_rate=1s)",
+    "workload_tracking=(enabled=true,is_custom=false,op_rate=1s,"
+    "tracking_key_format=QSQ,tracking_value_format=iS)",
     confchk_custom_tracking_validation_example, 10},
   {"hs_cleanup",
     "cache_size_mb=0,checkpoint_manager=(enabled=false,op_rate=1s),"
