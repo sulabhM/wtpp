@@ -1,33 +1,33 @@
 # Configuration for custom_tracking_validation_example.
 # need to be defined.
-duration_seconds=8,
-cache_size_mb=10,
+duration_seconds=20,
+cache_size_mb=1,
 workload_generator=
 (
     populate_config=
     (
         collection_count=1,
+        # The collection only needs to be created.
         key_count_per_collection=0,
-        key_size=10,
         thread_count=1,
-        value_size=10
     ),
     custom_config=
     (
-        op_rate=5s,
+        # Reconfigure the cache size everything 5 seconds.
+        op_rate=10s,
         thread_count=1
     ),
     insert_config=
     (
-        op_rate=1s,
-        ops_per_transaction=(max=4,min=4),
         key_size=10000,
-        thread_count=10,
+        op_rate=2s,
+        ops_per_transaction=(min=2,max=2),
+        thread_count=5,
         value_size=1000000
     ),
 ),
 workload_tracking=
 (
     tracking_key_format=QSQ,
-    tracking_value_format=Q
+    tracking_value_format=QQ
 )

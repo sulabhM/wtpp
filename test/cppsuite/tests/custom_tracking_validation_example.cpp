@@ -45,16 +45,17 @@ class tracking_table_template_1 : public test_harness::workload_tracking {
       const uint64_t &collection_id, const std::string &key, const std::string &value,
       wt_timestamp_t ts, scoped_cursor &op_track_cursor) override final
     {
-        std::cout << "set_tracking_cursor - txn id: "
-                  << ((WT_SESSION_IMPL *)tc_session.get())->txn->id << std::endl;
-        std::cout << "set_tracking_cursor - ts: " << ts << std::endl;
+        // std::cout << "set_tracking_cursor - txn id: "
+        //           << ((WT_SESSION_IMPL *)tc_session.get())->txn->id << std::endl;
+        // std::cout << "set_tracking_cursor - ts: " << ts << std::endl;
         WT_CONNECTION_IMPL *conn = S2C((WT_SESSION_IMPL *)tc_session.get());
         uint64_t cache_size = conn->cache_size;
-        std::cout << "set_tracking_cursor - cache: " << cache_size << std::endl;
+        uint64_t txn_id = ((WT_SESSION_IMPL *)tc_session.get())->txn->id;
+        // std::cout << "set_tracking_cursor - cache: " << cache_size << std::endl;
 
         /* You can replace this call to define your own tracking table contents. */
         op_track_cursor->set_key(op_track_cursor.get(), collection_id, key.c_str(), ts);
-        op_track_cursor->set_value(op_track_cursor.get(), cache_size);
+        op_track_cursor->set_value(op_track_cursor.get(), cache_size, txn_id);
         // workload_tracking::set_tracking_cursor(
         //   tc_session, operation, collection_id, key, value, ts, op_track_cursor);
     }
@@ -89,6 +90,8 @@ class custom_tracking_validation_example : public test_harness::test {
     //     std::cout << "populate: nothing done." << std::endl;
     // }
 
+    bool reconfigure_required = false;
+
     void
     custom_operation(test_harness::thread_context *tc) override final
     {
@@ -96,21 +99,29 @@ class custom_tracking_validation_example : public test_harness::test {
         uint64_t cache_size;
         while (tc->running()) {
             tc->sleep();
+            // The system has to stop here when we reconfigure
+            reconfigure_required = true;
+            while(inserts_running != 0 && tc->running()) {
+                std::cout << "We want to reconfigure but inserts are running..." << std::endl;
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            }
             WT_CONNECTION_IMPL *conn = S2C((WT_SESSION_IMPL *)tc->session.get());
             cache_size = conn->cache_size;
             // Need to reconfigure the cache size
             WT_CONNECTION *conn1 = (WT_CONNECTION *)conn;
             if (change) {
-                testutil_check(conn1->reconfigure(conn1, "cache_size=10MB"));
+                testutil_check(conn1->reconfigure(conn1, "cache_size=1MB"));
             } else {
                 testutil_check(conn1->reconfigure(conn1, "cache_size=500MB"));
             }
             std::cout << "Cache size was " << cache_size << " and is now " << conn->cache_size
                       << std::endl;
             change = !change;
+            reconfigure_required = false;
         }
     }
 
+uint64_t inserts_running = 0;
     void
     insert_operation(test_harness::thread_context *tc) override final
     {
@@ -118,12 +129,18 @@ class custom_tracking_validation_example : public test_harness::test {
         scoped_cursor cursor = tc->session.open_scoped_cursor("table:collection_0");
 
         while (tc->running()) {
+            ++inserts_running;
+            std::cout << "Starting inserts..." << std::endl;
             tc->transaction.try_begin();
-            std::cout << "Trying to insert data with key_size " << tc->key_size
-                      << " and value_size " << tc->value_size << std::endl;
-            bool ret = tc->insert(cursor, 0, tc->id);
+            // std::cout << "Trying to insert data with key_size " << tc->key_size
+            //           << " and value_size " << tc->value_size << std::endl;
+            const std::string value = random_generator::instance().generate_pseudo_random_string(tc->value_size);
+            bool ret = tc->insert(cursor, 0, value);
 
-            if (!ret) {
+            if(reconfigure_required) {
+                std::cout << "reconfiguration is required, aborting..." << std::endl;
+            }
+            if (!ret || reconfigure_required) {
                 std::cout << "Need to rollback txn "
                           << ((WT_SESSION_IMPL *)tc->session.get())->txn->id << std::endl;
                 tc->transaction.rollback();
@@ -132,11 +149,13 @@ class custom_tracking_validation_example : public test_harness::test {
                     testutil_assert(tc->transaction.commit() == true);
                     std::cout << "Commit done for txn "
                               << ((WT_SESSION_IMPL *)tc->session.get())->txn->id << std::endl;
-                } else {
-                    std::cout << "Cannot commit yet" << std::endl;
-                }
+                } 
+                // else {
+                //     std::cout << "Cannot commit yet" << std::endl;
+                // }
             }
-
+            --inserts_running;
+            std::cout << "Sleeping..." << std::endl;
             tc->sleep();
         }
         /* Make sure the last transaction is rolled back now the work is finished. */
@@ -167,7 +186,7 @@ class custom_tracking_validation_example : public test_harness::test {
       const std::vector<uint64_t> &) override final
     {
         WT_DECL_RET;
-        uint64_t tracked_collection_id, tracked_cache_size;
+        uint64_t tracked_collection_id, tracked_cache_size, tracked_txn_id;
         wt_timestamp_t tracked_timestamp;
         const char *tracked_key;
 
@@ -181,13 +200,13 @@ class custom_tracking_validation_example : public test_harness::test {
             ++cpt;
             testutil_check(cursor->get_key(
               cursor.get(), &tracked_collection_id, &tracked_key, &tracked_timestamp));
-            testutil_check(cursor->get_value(cursor.get(), &tracked_cache_size));
+            testutil_check(cursor->get_value(cursor.get(), &tracked_cache_size, &tracked_txn_id));
             // std::cout << "tracked_collection_id: " << tracked_collection_id << std::endl;
             // std::cout << "tracked_key: " << tracked_key << std::endl;
             // std::cout << "tracked_timestamp: " << tracked_timestamp << std::endl;
-            std::cout << "tracked_cache_size: " << tracked_cache_size << std::endl;
+            std::cout << "tracked_txn_id: " << tracked_txn_id << " - tracked_cache_size: " << tracked_cache_size << std::endl;
             /* Transactions could go through only when the cache size was large enough. */
-            testutil_assert(tracked_cache_size >= 524288000);
+            // testutil_assert(tracked_cache_size >= 524288000);
         }
         std::cout << "cpt is " << cpt << std::endl;
         /* Four records had time to go through. */

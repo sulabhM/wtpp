@@ -27,7 +27,6 @@
  */
 
 #include "test_harness/test.h"
-#include "test_harness/workload/random_generator.h"
 #include "test_harness/timestamp_manager.h"
 
 using namespace test_harness;

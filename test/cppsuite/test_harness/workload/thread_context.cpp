@@ -100,7 +100,7 @@ transaction_context::try_begin(const std::string &config)
 {
     if (!_in_txn) {
         begin(config);
-        std::cout << "new txn started!" << std::endl;
+        // std::cout << "new txn started!" << std::endl;
     }
 }
 
@@ -169,8 +169,8 @@ transaction_context::set_needs_rollback(bool rollback)
 bool
 transaction_context::can_commit()
 {
-    std::cout << "inside can_commit, _op_count " << _op_count << " and _target_op_count "
-              << _target_op_count << std::endl;
+    // std::cout << "inside can_commit, _op_count " << _op_count << " and _target_op_count "
+    //           << _target_op_count << std::endl;
     return (!_needs_rollback && can_rollback());
 }
 
@@ -274,19 +274,20 @@ thread_context::insert(scoped_cursor &cursor, uint64_t collection_id, const std:
     cursor->set_key(cursor.get(), key.c_str());
     cursor->set_value(cursor.get(), value.c_str());
     ret = cursor->insert(cursor.get());
-    std::cout << "insert operation ret is " << ret << std::endl;
+    // std::cout << "insert operation ret is " << ret << std::endl;
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
             return (false);
         } else
             testutil_die(ret, "unhandled error while trying to insert a key");
-    } else {
-        std::cout << "Inserted data!" << std::endl;
-    }
+    } 
+    // else {
+    //     std::cout << "Inserted data!" << std::endl;
+    // }
     ret = tracking->save_operation(
       session, tracking_operation::INSERT, collection_id, key, value, ts, op_track_cursor);
-    std::cout << "save operation ret is " << ret << std::endl;
+    // std::cout << "save operation ret is " << ret << std::endl;
     if (ret != 0) {
         if (ret == WT_ROLLBACK) {
             transaction.set_needs_rollback(true);
