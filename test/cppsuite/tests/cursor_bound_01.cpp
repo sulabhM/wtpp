@@ -71,7 +71,7 @@ class cursor_bound_01 : public test {
               ",inclusive=" + std::string(_inclusive ? "true" : "false");
         }
 
-        std::string
+        const std::string&
         get_key() const
         {
             return _key;

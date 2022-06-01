@@ -363,17 +363,19 @@ static inline int
 __cursor_row_next(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_t *skippedp,
   WT_ITEM *prefix, bool *prefix_key_out_of_bounds)
 {
+    WT_BTREE *btree;
     WT_CELL_UNPACK_KV kpack;
     WT_INSERT *ins;
     WT_ITEM *key;
     WT_PAGE *page;
     WT_ROW *rip;
     WT_SESSION_IMPL *session;
-    bool prefix_search;
+    bool prefix_search, out_range;
 
     key = &cbt->iface.key;
     page = cbt->ref->page;
     session = CUR2S(cbt);
+    btree = S2BT(session);
     *prefix_key_out_of_bounds = false;
     prefix_search = prefix != NULL && F_ISSET(&cbt->iface, WT_CURSTD_PREFIX_SEARCH);
     *skippedp = 0;
@@ -386,6 +388,27 @@ __cursor_row_next(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_t *skip
             goto restart_read_page;
     }
     cbt->iter_retry = WT_CBT_RETRY_NOTSET;
+
+    // /* Positioning the cursor to start at the lower bound if bounds have been set. */
+    // if (bounds_set) {
+    //     cursor->set_key(&cbt->iface, cursor->lower_bound);
+    //     cursor->search_near(&cbt->iface, &exact);
+
+    //     cursor->get_key(&cbt->iface, &search_near_key);
+
+    //     if((&search_near_key) == WT_NOTFOUND){
+    //         return (WT_NOTFOUND);
+    //     }
+
+    //     /* Search near cannot return a lower value than the lower bound. */
+    //     if (exact < 0) {
+    //         // ?
+    //     }
+    //     /* If the search near returns a higher value, ensure it's within the upper bound. */
+    //     else if(exact > 0) {
+    //         WT_ASSERT(session, &search_near_key < (&cbt->iface,->upper_bound));
+    //     }
+    // }
 
     /*
      * For row-store pages, we need a single item that tells us the part of the page we're walking
@@ -432,6 +455,18 @@ restart_read_insert:
                 WT_STAT_CONN_DATA_INCR(session, cursor_search_near_prefix_fast_paths);
                 return (WT_NOTFOUND);
             }
+
+            if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_UPPER)) {
+                WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
+                WT_RET(__wt_compare_bounds(session, &cbt->iface, btree->collator, true, &out_range));
+                /* Check that the key is within the range if bounds have been set. */
+                if (out_range) {
+                    *prefix_key_out_of_bounds = true;
+                    WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
+                    return (WT_NOTFOUND);
+                }
+            }
+
             WT_RET(__wt_txn_read_upd_list(session, cbt, ins->upd));
             if (cbt->upd_value->type == WT_UPDATE_INVALID) {
                 ++*skippedp;
@@ -483,6 +518,16 @@ restart_read_page:
             *prefix_key_out_of_bounds = true;
             WT_STAT_CONN_DATA_INCR(session, cursor_search_near_prefix_fast_paths);
             return (WT_NOTFOUND);
+        }
+        if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_UPPER)) {
+            WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
+            WT_RET(__wt_compare_bounds(session, &cbt->iface, btree->collator, true, &out_range));
+            /* Check that the key is within the range if bounds have been set. */
+            if (out_range) {
+                *prefix_key_out_of_bounds = true;
+                WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
+                return (WT_NOTFOUND);
+            }
         }
 
         /*
