@@ -65,6 +65,8 @@ __cursor_page_pinned(WT_CURSOR_BTREE *cbt, bool search_operation)
     /*
      * Check the page active flag, asserting the page reference with any external key.
      */
+    // printf("bt_cursor.c\n");
+    // printf("WT_CBT_ACTIVE: %d\n",(int)WT_CBT_ACTIVE);
     if (!F_ISSET(cbt, WT_CBT_ACTIVE)) {
         WT_ASSERT(session, cbt->ref == NULL && !F_ISSET(cursor, WT_CURSTD_KEY_INT));
         return (false);

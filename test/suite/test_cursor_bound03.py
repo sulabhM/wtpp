@@ -109,13 +109,19 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         cursor.set_key(self.gen_key(50))
         self.set_bounds(cursor,"upper")
         
+        #Set lower bound to test that cursor positioning works.
+        cursor.set_key(self.gen_key(42))
+        self.set_bounds(cursor,"lower")
+
         #Upper bound set, default inclusive options works.
         while True:
-            ret = cursor.next()
-            self.tty("next ret:")
-            self.tty(str(ret))
+            nextret = cursor.next()
+            key = cursor.get_key()
+            self.assertEqual(int(key),int(42))
+            # self.tty("next ret:")
+            # self.tty(str(nextret))
             
-            if ret != 0:
+            if nextret != 0:
                 break
             key = cursor.get_key()
             if self.inclusive:
@@ -127,7 +133,6 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
 
     def test_bound_prev_early_exit(self):
         cursor = self.create_session_and_cursor()
-        self.tty("PREV TESTS----------------")
 
         # Test bound API: Early exit works with next traversal call.
         cursor.set_key(self.gen_key(55))
