@@ -525,7 +525,7 @@ struct __wt_cursor_stat {
     WT_ITEM pv; /* Current stats value (string) */
 
     /* Options declared in flags.py, shared by WT_CONNECTION::stat_flags */
-    uint32_t SET;
+    uint32_t flags;
 };
 
 /*

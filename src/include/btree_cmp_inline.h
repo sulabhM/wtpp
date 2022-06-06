@@ -147,37 +147,22 @@ static inline int
 __wt_compare_bounds(WT_SESSION_IMPL *session, WT_CURSOR *cursor, WT_COLLATOR *collator,
   bool direction, bool *out_range)
 {
-    WT_DECL_ITEM(key);
-    size_t size;
     int cmpp;
 
-    WT_ERR(__wt_scr_alloc(session, 0, &key));
-    if (S2BT(session)->type == BTREE_ROW)
-        WT_ERR(__wt_compare(session, collator, &cursor->key, &cursor->upper_bound, &cmpp));
-    else {
-        key->data = cursor->raw_recno_buf;
-        WT_ERR(__wt_struct_size(session, &size, "q", cursor->recno));
-        key->size = size;
-        WT_IGNORE_RET(__wt_struct_pack(
-          session, cursor->raw_recno_buf, sizeof(cursor->raw_recno_buf), "q", cursor->recno));
-    }
-
     if (direction) {
-        WT_ERR(__wt_compare(session, collator, key, &cursor->upper_bound, &cmpp));
+        WT_RET(__wt_compare(session, collator, &cursor->key, &cursor->upper_bound, &cmpp));
         if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE))
             *out_range = (cmpp > 0);
         else
             *out_range = (cmpp >= 0);
     } else {
-        WT_ERR(__wt_compare(session, collator, key, &cursor->lower_bound, &cmpp));
+        WT_RET(__wt_compare(session, collator, &cursor->key, &cursor->lower_bound, &cmpp));
         if (F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE))
             *out_range = (cmpp < 0);
         else
             *out_range = (cmpp <= 0);
     }
 
-err:
-    __wt_scr_free(session, &key);
     return (0);
 }
 
