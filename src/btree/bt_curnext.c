@@ -319,6 +319,13 @@ restart_read:
         cbt->ins_head = WT_COL_UPDATE_SLOT(page, cbt->slot);
         cbt->ins = __col_insert_search_match(cbt->ins_head, cbt->recno);
         __wt_upd_value_clear(cbt->upd_value);
+
+        if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_UPPER)) {
+            WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
+            /* Check that the key is within the range if bounds have been set. */
+            WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
+            //    return (WT_NOTFOUND);
+        }
         if (cbt->ins != NULL)
             WT_RET(__wt_txn_read_upd_list(session, cbt, cbt->ins->upd));
         if (cbt->upd_value->type != WT_UPDATE_INVALID) {
@@ -528,7 +535,8 @@ restart_read_insert:
 
             if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_UPPER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
-                WT_RET(__wt_compare_bounds(session, &cbt->iface, btree->collator, true, &out_range));
+                WT_RET(
+                  __wt_compare_bounds(session, &cbt->iface, btree->collator, true, &out_range));
                 /* Check that the key is within the range if bounds have been set. */
                 if (out_range) {
                     *prefix_key_out_of_bounds = true;
@@ -860,7 +868,8 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
     if (truncating)
         LF_SET(WT_READ_TRUNCATE);
 
-    F_CLR(cursor, WT_CURSTD_KEY_SET | WT_CURSTD_VALUE_SET);
+    F_CLR(cursor, WT_CURSTD_KEY_SET);
+    F_CLR(cursor, WT_CURSTD_VALUE_SET);
 
     WT_ERR(__wt_cursor_func_init(cbt, false));
 

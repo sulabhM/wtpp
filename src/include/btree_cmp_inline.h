@@ -139,29 +139,45 @@ __wt_prefix_match(const WT_ITEM *prefix, const WT_ITEM *tree_item)
 
 /*
  * __wt_compare_bounds --
- *      Return if the cursor key is within the bounded range. If direction is True, this indicates
- *      a next call and the key is checked against the upper bound. If direction is False, this
- *      indicates a prev call and the key is then checked against the lower bound.
+ *     Return if the cursor key is within the bounded range. If direction is True, this indicates a
+ *     next call and the key is checked against the upper bound. If direction is False, this
+ *     indicates a prev call and the key is then checked against the lower bound.
  */
 static inline int
 __wt_compare_bounds(WT_SESSION_IMPL *session, WT_CURSOR *cursor, WT_COLLATOR *collator,
   bool direction, bool *out_range)
 {
+    WT_DECL_ITEM(key);
+    size_t size;
     int cmpp;
 
+    WT_ERR(__wt_scr_alloc(session, 0, &key));
+    if (S2BT(session)->type == BTREE_ROW)
+        WT_ERR(__wt_compare(session, collator, &cursor->key, &cursor->upper_bound, &cmpp));
+    else {
+        key->data = cursor->raw_recno_buf;
+        WT_ERR(__wt_struct_size(session, &size, "q", cursor->recno));
+        key->size = size;
+        WT_IGNORE_RET(__wt_struct_pack(
+          session, cursor->raw_recno_buf, sizeof(cursor->raw_recno_buf), "q", cursor->recno));
+    }
+
     if (direction) {
-        WT_RET(__wt_compare(session, collator, &cursor->key, &cursor->upper_bound, &cmpp));
-        if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE)) 
+        WT_ERR(__wt_compare(session, collator, key, &cursor->upper_bound, &cmpp));
+        if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE))
             *out_range = (cmpp > 0);
         else
-            *out_range = (cmpp >= 0); 
+            *out_range = (cmpp >= 0);
     } else {
-        WT_RET(__wt_compare(session, collator, &cursor->key, &cursor->lower_bound, &cmpp));
+        WT_ERR(__wt_compare(session, collator, key, &cursor->lower_bound, &cmpp));
         if (F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE))
             *out_range = (cmpp < 0);
         else
             *out_range = (cmpp <= 0);
     }
+
+err:
+    __wt_scr_free(session, &key);
     return (0);
 }
 

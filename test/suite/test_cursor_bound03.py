@@ -104,10 +104,12 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         # Test bound API: Early exit works with next traversal call.
         cursor.set_key(self.gen_key(50))
         cursor.set_value("1000")
-        self.set_bounds(cursor,"upper")
         cursor.insert()
 
-        # Upper bound set, default inclusive options works.
+        cursor.set_key(self.gen_key(50))
+        self.set_bounds(cursor,"upper")
+        
+        #Upper bound set, default inclusive options works.
         while True:
             ret = cursor.next()
             self.tty("next ret:")
@@ -116,11 +118,8 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
             if ret != 0:
                 break
             key = cursor.get_key()
-            self.tty(str(key))
-            self.tty(str(50))
             if self.inclusive:
                 self.assertTrue(int(key) <= int(50))
-
             else:
                 self.assertTrue(int(key) < int(50))        
 
