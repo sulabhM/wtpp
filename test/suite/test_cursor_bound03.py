@@ -38,14 +38,14 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
 
     types = [
         ('file', dict(uri='file:', use_colgroup=False)),
-        ('table', dict(uri='table:', use_colgroup=False)),
+        # ('table', dict(uri='table:', use_colgroup=False)),
     ]
 
     key_format_values = [
         ('string', dict(key_format='S')),
         # ('var', dict(key_format='r')),
-        ('int', dict(key_format='i')),
-        ('bytes', dict(key_format='u')),
+        # ('int', dict(key_format='i')),
+        # ('bytes', dict(key_format='u')),
     ]
 
     inclusive = [
@@ -98,11 +98,17 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         self.set_bounds(cursor,"upper")
         cursor.insert()
 
+        #Set lower bound to test that cursor positioning works.
+        cursor.set_key(self.gen_key(42))
+        self.set_bounds(cursor,"lower")
+
         #Upper bound set, default inclusive options works.
         while True:
             nextret = cursor.next()
-            self.tty("next ret:")
-            self.tty(str(nextret))
+            key = cursor.get_key()
+            self.assertEqual(int(key),int(42))
+            # self.tty("next ret:")
+            # self.tty(str(nextret))
             
             if nextret != 0:
                 break
@@ -118,28 +124,25 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         return cursor
 
 
-    def test_bound_prev_early_exit(self):
-        cursor = self.create_session_and_cursor()
-        self.tty("PREV TESTS----------------")
+    # def test_bound_prev_early_exit(self):
+    #     cursor = self.create_session_and_cursor()
 
-        #Test bound API: Early exit works with next traversal call.
-        cursor.set_key(self.gen_key(55))
-        self.set_bounds(cursor,"lower")
+    #     #Test bound API: Early exit works with next traversal call.
+    #     cursor.set_key(self.gen_key(55))
+    #     self.set_bounds(cursor,"lower")
 
-        #Lower bound set, default inclusive options works.
-        while True:
-            prevret = cursor.prev()
-            self.tty("prev ret:")
-            self.tty(str(prevret))
-            if prevret != 0:
-                break
-            key = cursor.get_key()
-            self.tty("prev key\n")
-            self.tty(str(key))
-            self.assertTrue(int(key) >= int(55))
+    #     #Lower bound set, default inclusive options works.
+    #     while True:
+    #         prevret = cursor.prev()
+    #         if prevret != 0:
+    #             break
+    #         key = cursor.get_key()
+    #         self.tty("prev key\n")
+    #         self.tty(str(key))
+    #         self.assertTrue(int(key) >= int(55))
 
-        return cursor
-        
+    #     return cursor
+
     # def test_bound_early_exit(self):
     #     cursor = self.create_session_and_cursor()
     #     cursor = self.test_bound_next_early_exit(cursor)

@@ -26,9 +26,9 @@ workload_generator=
     ),
     insert_config=
     (
-        key_size=100,
+        key_size=10,
         op_rate=5ms,
-        thread_count=5,
+        thread_count=2,
         value_size=200
     ),
     read_config=
@@ -49,7 +49,7 @@ workload_generator=
     ),
     custom_config=
     (
-        thread_count=5
+        thread_count=1
     )
 ),
 workload_tracking=
