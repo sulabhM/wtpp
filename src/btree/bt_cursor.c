@@ -65,8 +65,6 @@ __cursor_page_pinned(WT_CURSOR_BTREE *cbt, bool search_operation)
     /*
      * Check the page active flag, asserting the page reference with any external key.
      */
-    // printf("bt_cursor.c\n");
-    // printf("WT_CBT_ACTIVE: %d\n",(int)WT_CBT_ACTIVE);
     if (!F_ISSET(cbt, WT_CBT_ACTIVE)) {
         WT_ASSERT(session, cbt->ref == NULL && !F_ISSET(cursor, WT_CURSTD_KEY_INT));
         return (false);
@@ -520,7 +518,7 @@ __wt_btcur_reset(WT_CURSOR_BTREE *cbt)
     if (F_ISSET(cursor, WT_CURSTD_BOUNDS_SET)) {
         WT_STAT_CONN_DATA_INCR(session, cursor_bounds_reset);
         /* Clear upper bound, and free the buffer. */
-        // F_CLR(cursor, WT_CURSTD_BOUND_UPPER | WT_CURSTD_BOUND_UPPER_INCLUSIVE);
+        F_CLR(cursor, WT_CURSTD_BOUND_UPPER | WT_CURSTD_BOUND_UPPER_INCLUSIVE);
         __wt_buf_free(session, &cursor->upper_bound);
         WT_CLEAR(cursor->upper_bound);
         /* Clear lower bound, and free the buffer. */

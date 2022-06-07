@@ -1214,8 +1214,8 @@ __wt_cursor_bound(WT_CURSOR *cursor, const char *config)
             F_SET(cursor, WT_CURSTD_BOUND_UPPER);
             if (inclusive)
                 F_SET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE);
-            // else
-            //     F_CLR(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE);
+            else
+                F_CLR(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE);
             WT_ERR(__wt_buf_set(session, &cursor->upper_bound, key.data, key.size));
         } else if (WT_STRING_MATCH("lower", cval.str, cval.len)) {
             /*

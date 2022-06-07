@@ -124,7 +124,7 @@ __cursor_fix_append_prev(
   WT_CURSOR_BTREE *cbt, bool newpage, bool restart, bool *prefix_key_out_of_bounds)
 {
     WT_SESSION_IMPL *session;
-    bool out_range;
+    uint64_t recno_bound;
 
     session = CUR2S(cbt);
 
@@ -191,10 +191,11 @@ __cursor_fix_append_prev(
 
     if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
         WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-        WT_RET(
-          __wt_compare_bounds(session, &cbt->iface, S2BT(session)->collator, false, &out_range));
+        WT_RET(__wt_struct_unpack(
+          session, cbt->iface.lower_bound.data, cbt->iface.lower_bound.size, "q", &recno_bound));
         /* Check that the key is within the range if bounds have been set. */
-        if (out_range) {
+        if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno < recno_bound) ||
+          (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno <= recno_bound)) {
             *prefix_key_out_of_bounds = true;
             WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
             return (WT_NOTFOUND);
@@ -236,7 +237,7 @@ __cursor_fix_prev(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, bool *prefix
 {
     WT_PAGE *page;
     WT_SESSION_IMPL *session;
-    bool out_range;
+    uint64_t recno_bound;
 
     session = CUR2S(cbt);
     page = cbt->ref->page;
@@ -279,10 +280,11 @@ restart_read:
 
     if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
         WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-        WT_RET(
-          __wt_compare_bounds(session, &cbt->iface, S2BT(session)->collator, false, &out_range));
+        WT_RET(__wt_struct_unpack(
+          session, &cbt->iface.lower_bound.data, cbt->iface.lower_bound.size, "q", &recno_bound));
         /* Check that the key is within the range if bounds have been set. */
-        if (out_range) {
+        if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno < recno_bound) ||
+          (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno <= recno_bound)) {
             *prefix_key_out_of_bounds = true;
             WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
             return (WT_NOTFOUND);
@@ -327,7 +329,7 @@ __cursor_var_append_prev(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_
   bool *prefix_key_out_of_bounds)
 {
     WT_SESSION_IMPL *session;
-    bool out_range;
+    uint64_t recno_bound;
 
     session = CUR2S(cbt);
     *skippedp = 0;
@@ -355,10 +357,13 @@ new_page:
 restart_read:
         if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
             WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-            WT_RET(__wt_compare_bounds(
-              session, &cbt->iface, S2BT(session)->collator, false, &out_range));
+            WT_RET(__wt_struct_unpack(session, &cbt->iface.lower_bound.data,
+              cbt->iface.lower_bound.size, "q", &recno_bound));
             /* Check that the key is within the range if bounds have been set. */
-            if (out_range) {
+            if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                  cbt->recno < recno_bound) ||
+              (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                cbt->recno <= recno_bound)) {
                 *prefix_key_out_of_bounds = true;
                 WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
                 return (WT_NOTFOUND);
@@ -397,8 +402,7 @@ __cursor_var_prev(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_t *skip
     WT_INSERT *ins;
     WT_PAGE *page;
     WT_SESSION_IMPL *session;
-    uint64_t rle, rle_start;
-    bool out_range;
+    uint64_t recno_bound, rle, rle_start;
 
     session = CUR2S(cbt);
     page = cbt->ref->page;
@@ -449,10 +453,13 @@ restart_read:
 
             if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-                WT_RET(__wt_compare_bounds(
-                  session, &cbt->iface, S2BT(session)->collator, false, &out_range));
+                WT_RET(__wt_struct_unpack(session, &cbt->iface.lower_bound.data,
+                  cbt->iface.lower_bound.size, "q", &recno_bound));
                 /* Check that the key is within the range if bounds have been set. */
-                if (out_range) {
+                if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                      cbt->recno < recno_bound) ||
+                  (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                    cbt->recno <= recno_bound)) {
                     *prefix_key_out_of_bounds = true;
                     WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
                     return (WT_NOTFOUND);
@@ -583,6 +590,7 @@ __cursor_row_prev(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_t *skip
     WT_PAGE *page;
     WT_ROW *rip;
     WT_SESSION_IMPL *session;
+    uint64_t recno_bound;
     bool out_range;
 
     key = &cbt->iface.key;
@@ -648,10 +656,13 @@ restart_read_insert:
 
             if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-                WT_RET(
-                  __wt_compare_bounds(session, &cbt->iface, btree->collator, false, &out_range));
+                WT_RET(__wt_struct_unpack(session, &cbt->iface.lower_bound.data,
+                  cbt->iface.lower_bound.size, "q", &recno_bound));
                 /* Check that the key is within the range if bounds have been set. */
-                if (out_range) {
+                if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                      cbt->recno < recno_bound) ||
+                  (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                    cbt->recno <= recno_bound)) {
                     *prefix_key_out_of_bounds = true;
                     WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
                     return (WT_NOTFOUND);

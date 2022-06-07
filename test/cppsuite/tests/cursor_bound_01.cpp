@@ -49,15 +49,19 @@ class cursor_bound_01 : public test {
     /* Class helper to represent the lower and uppers bounds for the range cursor. */
     class bound {
         public:
-        bound() = default;
-        bound(uint64_t key_size_max, bool lower_bound)
-            : _lower_bound(lower_bound)
+        bound()
+        {
+            _key.clear();
+            _inclusive = false;
+            _lower_bound = false;
+        };
+
+        bound(uint64_t key_size_max, bool lower_bound) : _lower_bound(lower_bound)
         {
             bool set_inclusive = random_generator::instance().generate_integer(0, 1);
             // FIXME: Use random strings, once bounds are implemented properly.
             auto key_size =
-              random_generator::instance().generate_integer(static_cast<uint64_t>(1),
-              key_size_max);
+              random_generator::instance().generate_integer(static_cast<uint64_t>(1), key_size_max);
             auto random_key = random_generator::instance().generate_random_string(
               key_size, characters_type::ALPHABET);
             _key = random_key;
@@ -84,7 +88,7 @@ class cursor_bound_01 : public test {
         }
 
         void
-        clear() 
+        clear()
         {
             _key.clear();
             _inclusive = false;
@@ -177,7 +181,7 @@ class cursor_bound_01 : public test {
         const char *normal_key;
         testutil_check(normal_cursor->get_key(normal_cursor.get(), &normal_key));
         /*  Make sure that normal cursor returns a key that is outside of the range. */
-        if (range_ret == WT_NOTFOUND){
+        if (range_ret == WT_NOTFOUND) {
             if (next) {
                 testutil_assert(!upper_key.empty());
                 testutil_assert(!custom_lexicographical_compare(normal_key, upper_key, true));
@@ -251,28 +255,17 @@ class cursor_bound_01 : public test {
             range_cursor->bound(range_cursor.get(), "action=clear");
 
         if (set_random_bounds == LOWER_BOUND_SET || set_random_bounds == ALL_BOUNDS_SET) {
-            /* Reverse case. */
-            if (_reverse_collator_enabled)
-                lower_bound = bound(tc->key_size, true);
-            /* Normal case. */
-            else
-                lower_bound = bound(tc->key_size, true);
+            lower_bound = bound(tc->key_size, true);
             range_cursor->set_key(range_cursor.get(), lower_bound.get_key().c_str());
             ret = range_cursor->bound(range_cursor.get(), lower_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
 
-            if(ret == EINVAL)
+            if (ret == EINVAL)
                 lower_bound.clear();
-        
         }
 
         if (set_random_bounds == UPPER_BOUND_SET || set_random_bounds == ALL_BOUNDS_SET) {
-            /* Reverse case. */
-            if (_reverse_collator_enabled)
-                upper_bound = bound(tc->key_size, false);
-            /* Normal case. */
-            else
-                upper_bound = bound(tc->key_size, false);
+            upper_bound = bound(tc->key_size, false);
             range_cursor->set_key(range_cursor.get(), upper_bound.get_key().c_str());
             ret = range_cursor->bound(range_cursor.get(), upper_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
@@ -281,11 +274,11 @@ class cursor_bound_01 : public test {
                 upper_bound.clear();
         }
 
-        if (upper_bound.get_key().empty() && lower_bound.get_key().empty()){
+        if (upper_bound.get_key().empty() && lower_bound.get_key().empty()) {
             range_cursor->bound(range_cursor.get(), "action=clear");
         }
 
-        return std::make_pair(std::move(lower_bound), std::move(upper_bound));
+        return std::make_pair(lower_bound, upper_bound);
     }
 
     /*
@@ -626,16 +619,8 @@ class cursor_bound_01 : public test {
             auto &range_cursor = cursors[coll.id];
             auto bound_pair = set_random_bounds(tc, range_cursor);
             /* Only update the bounds when the bounds have a key. */
-            if (!bound_pair.first.get_key().empty())
-                lower_bound = bound_pair.first;
-            if (!bound_pair.second.get_key().empty())
-                upper_bound = bound_pair.second;
-
-            /* Clear all bounds if both bounds don't have a key. */
-            if (bound_pair.first.get_key().empty() && bound_pair.second.get_key().empty()) {
-                lower_bound = bound_pair.first;
-                upper_bound = bound_pair.second;
-            }
+            lower_bound = bound_pair.first;
+            upper_bound = bound_pair.second;
 
             scoped_cursor normal_cursor = tc->session.open_scoped_cursor(coll.name);
             wt_timestamp_t ts = tc->tsm->get_random_ts();
@@ -698,16 +683,8 @@ class cursor_bound_01 : public test {
             auto &range_cursor = cursors[coll.id];
             auto bound_pair = set_random_bounds(tc, range_cursor);
             /* Only update the bounds when the bounds have a key. */
-            if (!bound_pair.first.get_key().empty())
-                lower_bound = (std::move(bound_pair.first));
-            if (!bound_pair.second.get_key().empty())
-                upper_bound = (std::move(bound_pair.second));
-
-            /* Clear all bounds if both bounds doesn't have a key. */
-            if (bound_pair.first.get_key().empty() && bound_pair.second.get_key().empty()) {
-                lower_bound = bound_pair.first;
-                upper_bound = bound_pair.second;
-            }
+            lower_bound = bound_pair.first;
+            upper_bound = bound_pair.second;
 
             scoped_cursor normal_cursor = tc->session.open_scoped_cursor(coll.name);
             wt_timestamp_t ts = tc->tsm->get_random_ts();
