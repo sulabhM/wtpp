@@ -590,7 +590,6 @@ __cursor_row_prev(WT_CURSOR_BTREE *cbt, bool newpage, bool restart, size_t *skip
     WT_PAGE *page;
     WT_ROW *rip;
     WT_SESSION_IMPL *session;
-    uint64_t recno_bound;
     bool out_range;
 
     key = &cbt->iface.key;
@@ -656,13 +655,9 @@ restart_read_insert:
 
             if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-                WT_RET(__wt_struct_unpack(session, &cbt->iface.lower_bound.data,
-                  cbt->iface.lower_bound.size, "q", &recno_bound));
+                WT_RET(__wt_compare_bounds(session, &cbt->iface, btree->collator, false, &out_range));
                 /* Check that the key is within the range if bounds have been set. */
-                if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
-                      cbt->recno < recno_bound) ||
-                  (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
-                    cbt->recno <= recno_bound)) {
+                if (out_range) {
                     *prefix_key_out_of_bounds = true;
                     WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
                     return (WT_NOTFOUND);
@@ -778,7 +773,8 @@ __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
     if (truncating)
         LF_SET(WT_READ_TRUNCATE);
 
-    F_CLR(cursor, WT_CURSTD_KEY_SET | WT_CURSTD_VALUE_SET);
+    F_CLR(cursor, WT_CURSTD_KEY_SET);
+    F_CLR(cursor, WT_CURSTD_VALUE_SET);
 
     WT_ERR(__wt_cursor_func_init(cbt, false));
 
@@ -850,16 +846,6 @@ __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
             case WT_PAGE_ROW_LEAF:
                 ret = __cursor_row_prev(cbt, newpage, restart, &skipped, &prefix_key_out_of_bounds);
                 total_skipped += skipped;
-                /*
-                 * If we are doing a search near with prefix key configured, we need to check if we
-                 * have exited the cursor row prev function due to a prefix key mismatch. If so, we
-                 * can immediately return WT_NOTFOUND and we do not have to walk onto the previous
-                 * page.
-                 */
-                if (prefix_key_out_of_bounds) {
-                    WT_ASSERT(session, ret == WT_NOTFOUND);
-                    return (WT_NOTFOUND);
-                }
                 break;
             default:
                 WT_ERR(__wt_illegal_value(session, page->type));

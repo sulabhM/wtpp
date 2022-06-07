@@ -855,7 +855,7 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
     if ((&cbt->ref->page) == NULL && F_ISSET(cursor, WT_CURSTD_BOUND_LOWER)) {
         WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
         /* Positioning the cursor to start at the lower bound if bounds have been set. */
-        cursor->set_key(cursor, cursor->lower_bound.data);
+        __wt_cursor_set_raw_key(cursor, &cursor->lower_bound);
         WT_RET(cursor->search_near(cursor, &exact));
 
         /* When search_near_bounded is implemented then remove this.*/

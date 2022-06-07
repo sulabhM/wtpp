@@ -43,8 +43,8 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
 
     key_format_values = [
         ('string', dict(key_format='S',value_format='S')),
-        ('var', dict(key_format='r',value_format='S')),
-        ('fix', dict(key_format='r',value_format='8t')),
+        #('var', dict(key_format='r',value_format='S')),
+        #('fix', dict(key_format='r',value_format='8t')),
         ('int', dict(key_format='i',value_format='S')),
         ('bytes', dict(key_format='u',value_format='S')),
     ]
@@ -73,7 +73,7 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         else:
             return tuple(tuple_key)
             
-    def genvalue(self, i):
+    def gen_value(self, i):
         return 'value' + str(i)
 
     def set_bounds(self, cursor, bound_config):
@@ -87,17 +87,46 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
 
         cursor = self.session.open_cursor(uri)
         self.session.begin_transaction()
-        for i in range(40,60):
+        for i in range(40, 60):
             cursor.set_key(self.gen_key(i))
-            cursor[self.gen_key(i)] = self.genvalue(i) 
+            cursor[self.gen_key(i)] = self.gen_value(i) 
         self.session.commit_transaction()
 
-        evict_cursor = self.session.open_cursor(uri, None, "debug=(release_evict)")
-        for i in range(40,60):
-            evict_cursor.reset() 
+        if (self.evict):
+            evict_cursor = self.session.open_cursor(uri, None, "debug=(release_evict)")
+            for i in range(40, 60):
+                evict_cursor.reset() 
 
         return cursor
-                 
+
+    # Need to also test if we return WT_NOTFOUND.
+    def cursor_next_bound(self, cursor, lower_key, upper_key):
+        if (upper_key):
+            cursor.set_key(self.gen_key(upper_key))
+            self.set_bounds(cursor,"upper")
+        
+        if (lower_key):
+            #Set lower bound to test that cursor positioning works.
+            cursor.set_key(self.gen_key(lower_key))
+            self.set_bounds(cursor,"lower")
+
+        while True:
+            ret = cursor.next()
+            if ret != 0:
+                break
+            key = cursor.get_key()
+            if self.inclusive:
+                if (lower_key):
+                    self.assertTrue(int(lower_key) <= int(key))
+                if (upper_key):
+                    self.assertTrue(int(key) <= int(upper_key))
+            else:
+                if (lower_key):
+                    self.assertTrue(int(lower_key) < int(key))
+                if (upper_key):
+                    self.assertTrue(int(key) < int(upper_key))
+        self.assertEqual(cursor.bound("action=clear"), 0)
+
     def test_bound_next_early_exit(self):
         cursor = self.create_session_and_cursor()
         self.tty("NEXT TESTS----------------")
@@ -106,37 +135,23 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
         cursor.set_value("1000")
         cursor.insert()
 
-        cursor.set_key(self.gen_key(50))
-        self.set_bounds(cursor,"upper")
-        
-        #Set lower bound to test that cursor positioning works.
-        cursor.set_key(self.gen_key(42))
-        self.set_bounds(cursor,"lower")
+        # Upper bound set, default inclusive options works.
+        #self.cursor_next_bound(cursor, None, 50)
+        #self.cursor_next_bound(cursor, 45, 50)
+        #self.cursor_next_bound(cursor, 35, None)
 
-        #Upper bound set, default inclusive options works.
-        while True:
-            nextret = cursor.next()
-            key = cursor.get_key()
-            self.assertEqual(int(key),int(42))
-            # self.tty("next ret:")
-            # self.tty(str(nextret))
-            
-            if nextret != 0:
-                break
-            key = cursor.get_key()
-            if self.inclusive:
-                self.assertTrue(int(key) <= int(50))
-            else:
-                self.assertTrue(int(key) < int(50))        
+        cursor.set_key(self.gen_key(70))
+        self.set_bounds(cursor, "lower")
+        self.assertEqual(cursor.next(), wiredtiger.WT_NOTFOUND)
 
-        cursor.close()   
+        cursor.close()
 
     def test_bound_prev_early_exit(self):
         cursor = self.create_session_and_cursor()
 
         # Test bound API: Early exit works with next traversal call.
-        cursor.set_key(self.gen_key(55))
-        self.set_bounds(cursor,"lower")
+        cursor.set_key(self.gen_key(50))
+        self.set_bounds(cursor, "lower")
 
         # Lower bound set, default inclusive options works.
         while True:
@@ -148,7 +163,14 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
             key = cursor.get_key()
             self.tty("prev key\n")
             self.tty(str(key))
-            self.assertTrue(int(key) >= int(55))
+            if self.inclusive:
+                self.assertTrue(int(key) >= int(50))
+            else:
+                self.assertTrue(int(key) > int(50))
+
+        cursor.set_key(self.gen_key(70))
+        self.set_bounds(cursor,"lower")
+        self.assertEqual(cursor.prev(), wiredtiger.WT_NOTFOUND)
 
         cursor.close()
 

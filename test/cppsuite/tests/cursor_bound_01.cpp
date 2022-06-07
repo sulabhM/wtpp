@@ -260,8 +260,10 @@ class cursor_bound_01 : public test {
             ret = range_cursor->bound(range_cursor.get(), lower_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
 
-            if (ret == EINVAL)
+            if (ret == EINVAL) {
                 lower_bound.clear();
+                range_cursor->bound(range_cursor.get(), "action=clear,bound=lower");
+            }
         }
 
         if (set_random_bounds == UPPER_BOUND_SET || set_random_bounds == ALL_BOUNDS_SET) {
@@ -270,8 +272,10 @@ class cursor_bound_01 : public test {
             ret = range_cursor->bound(range_cursor.get(), upper_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
 
-            if (ret == EINVAL)
+            if (ret == EINVAL) {
                 upper_bound.clear();
+                range_cursor->bound(range_cursor.get(), "action=clear,bound=upper");
+            }
         }
 
         if (upper_bound.get_key().empty() && lower_bound.get_key().empty()) {
@@ -651,7 +655,6 @@ class cursor_bound_01 : public test {
                 tc->transaction.try_rollback();
                 tc->sleep();
             }
-            testutil_check(range_cursor->reset(range_cursor.get()));
         }
         /* Roll back the last transaction if still active now the work is finished. */
         if (tc->transaction.active())
@@ -695,13 +698,12 @@ class cursor_bound_01 : public test {
             tc->transaction.begin(
               "roundup_timestamps=(read=true),read_timestamp=" + tc->tsm->decimal_to_hex(ts));
             while (tc->transaction.active() && tc->running()) {
-
                 cursor_traversal(range_cursor, normal_cursor, lower_bound, upper_bound, true);
                 // cursor_traversal(range_cursor, normal_cursor, lower_bound, upper_bound, false);
                 tc->transaction.add_op();
                 tc->transaction.try_rollback();
                 tc->sleep();
-            }
+            }            
             testutil_check(range_cursor->reset(range_cursor.get()));
         }
         /* Roll back the last transaction if still active now the work is finished. */
