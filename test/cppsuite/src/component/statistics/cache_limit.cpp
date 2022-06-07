@@ -64,18 +64,13 @@ cache_limit::get_value_str(scoped_cursor &cursor)
 double
 cache_limit::get_cache_value(scoped_cursor &cursor)
 {
-    int64_t cache_bytes_image, cache_bytes_other, cache_bytes_max;
+    int64_t cache_bytes_inuse, cache_bytes_max;
     double use_percent;
-    /* Three statistics are required to compute cache use percentage. */
-    metrics_monitor::get_stat(cursor, WT_STAT_CONN_CACHE_BYTES_IMAGE, &cache_bytes_image);
-    metrics_monitor::get_stat(cursor, WT_STAT_CONN_CACHE_BYTES_OTHER, &cache_bytes_other);
+    metrics_monitor::get_stat(cursor, WT_STAT_CONN_CACHE_BYTES_INUSE, &cache_bytes_inuse);
     metrics_monitor::get_stat(cursor, WT_STAT_CONN_CACHE_BYTES_MAX, &cache_bytes_max);
-    /*
-     * Assert that we never exceed our configured limit for cache usage. Add 0.0 to avoid floating
-     * point conversion errors.
-     */
     testutil_assert(cache_bytes_max > 0);
-    use_percent = ((cache_bytes_image + cache_bytes_other + 0.0) / cache_bytes_max) * 100;
+    /* Add 0.0 to avoid floating point conversion errors. */
+    use_percent = ((cache_bytes_inuse + 0.0) / cache_bytes_max) * 100;
     return use_percent;
 }
 } // namespace test_harness
