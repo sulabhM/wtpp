@@ -703,7 +703,7 @@ class cursor_bound_01 : public test {
                 tc->transaction.add_op();
                 tc->transaction.try_rollback();
                 tc->sleep();
-            }            
+            }
             testutil_check(range_cursor->reset(range_cursor.get()));
         }
         /* Roll back the last transaction if still active now the work is finished. */

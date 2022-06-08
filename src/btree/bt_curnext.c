@@ -49,8 +49,8 @@ __cursor_fix_append_next(
         WT_RET(__wt_struct_unpack(
           session, cursor->upper_bound.data, cursor->upper_bound.size, "q", &recno_bound));
         /* Check that the key is within the range if bounds have been set. */
-        if ((F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno > recno_bound) ||
-          (!F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno >= recno_bound)) {
+        if ((F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno > recno_bound) ||
+          (!F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno >= recno_bound)) {
             *prefix_key_out_of_bounds = true;
             WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
             return (WT_NOTFOUND);
@@ -134,8 +134,8 @@ restart_read:
         WT_RET(__wt_struct_unpack(
           session, cursor->upper_bound.data, cursor->upper_bound.size, "q", &recno_bound));
         /* Check that the key is within the range if bounds have been set. */
-        if ((F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno > recno_bound) ||
-          (!F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno >= recno_bound)) {
+        if ((F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno > recno_bound) ||
+          (!F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno >= recno_bound)) {
             *prefix_key_out_of_bounds = true;
             WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
             return (WT_NOTFOUND);
@@ -218,8 +218,8 @@ restart_read:
             WT_RET(__wt_struct_unpack(
               session, cursor->upper_bound.data, cursor->upper_bound.size, "q", &recno_bound));
             /* Check that the key is within the range if bounds have been set. */
-            if ((F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno > recno_bound) ||
-              (!F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno >= recno_bound)) {
+            if ((F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno > recno_bound) ||
+              (!F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno >= recno_bound)) {
                 *prefix_key_out_of_bounds = true;
                 WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
                 return (WT_NOTFOUND);
@@ -302,8 +302,8 @@ restart_read:
             WT_RET(__wt_struct_unpack(
               session, cursor->upper_bound.data, cursor->upper_bound.size, "q", &recno_bound));
             /* Check that the key is within the range if bounds have been set. */
-            if ((F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno > recno_bound) ||
-              (!F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE) && cbt->recno >= recno_bound)) {
+            if ((F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno > recno_bound) ||
+              (!F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE) && cbt->recno >= recno_bound)) {
                 *prefix_key_out_of_bounds = true;
                 WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
                 return (WT_NOTFOUND);
@@ -867,7 +867,7 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
             if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER)) {
                 WT_RET(__wt_compare_bounds(session, cursor, btree->collator, true, &out_range));
                 if (out_range)
-                    return WT_NOTFOUND;
+                    return (WT_NOTFOUND);
             }
             return (0);
         }
@@ -927,7 +927,7 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
              */
             if (prefix_key_out_of_bounds) {
                 WT_ASSERT(session, ret == WT_NOTFOUND);
-                return (WT_NOTFOUND);
+                break;
             }
         } else if (page != NULL) {
             switch (page->type) {
@@ -956,7 +956,7 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
              */
             if (prefix_key_out_of_bounds) {
                 WT_ASSERT(session, ret == WT_NOTFOUND);
-                return (WT_NOTFOUND);
+                break;
             }
 
             /*
