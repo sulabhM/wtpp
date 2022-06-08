@@ -26,9 +26,11 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "test_harness/test.h"
-#include "test_harness/util/api_const.h"
-#include "test_harness/workload/random_generator.h"
+#include "src/common/constants.h"
+#include "src/common/random_generator.h"
+#include "src/main/test.h"
+
+using namespace test_harness;
 
 /*
  * In this test, we want to verify the usage of the cursor bound API and check that the cursor
@@ -43,8 +45,6 @@
  * random bounds set. Both next() and prev() calls with bounds set is verified against the
  * default cursor next() and prev() calls.
  */
-namespace test_harness {
-
 class cursor_bound_01 : public test {
     /* Class helper to represent the lower and uppers bounds for the range cursor. */
     class bound {
@@ -59,7 +59,6 @@ class cursor_bound_01 : public test {
         bound(uint64_t key_size_max, bool lower_bound) : _lower_bound(lower_bound)
         {
             bool set_inclusive = random_generator::instance().generate_integer(0, 1);
-            // FIXME: Use random strings, once bounds are implemented properly.
             auto key_size =
               random_generator::instance().generate_integer(static_cast<uint64_t>(1), key_size_max);
             auto random_key = random_generator::instance().generate_random_string(
@@ -111,7 +110,7 @@ class cursor_bound_01 : public test {
     {
         /* Track reverse_collator value as it is required for the custom comparator. */
         _reverse_collator_enabled = _config->get_bool(REVERSE_COLLATOR);
-        init_tracking();
+        init_operation_tracker();
     }
 
     bool
@@ -180,7 +179,10 @@ class cursor_bound_01 : public test {
 
         const char *normal_key;
         testutil_check(normal_cursor->get_key(normal_cursor.get(), &normal_key));
-        /*  Make sure that normal cursor returns a key that is outside of the range. */
+        /*
+         * It is possible that there are no keys within the range. Therefore make sure that normal
+         * cursor returns a key that is outside of the range.
+         */
         if (range_ret == WT_NOTFOUND) {
             if (next) {
                 testutil_assert(!upper_key.empty());
@@ -245,14 +247,14 @@ class cursor_bound_01 : public test {
      * inclusive configuration is also randomly set as well.
      */
     std::pair<bound, bound>
-    set_random_bounds(thread_context *tc, scoped_cursor &range_cursor)
+    set_random_bounds(thread_worker *tc, scoped_cursor &range_cursor)
     {
         int ret;
         bound lower_bound, upper_bound;
 
         auto set_random_bounds = random_generator::instance().generate_integer(0, 3);
         if (set_random_bounds == NO_BOUNDS)
-            range_cursor->bound(range_cursor.get(), "action=clear");
+            testutil_check(range_cursor->bound(range_cursor.get(), "action=clear"));
 
         if (set_random_bounds == LOWER_BOUND_SET || set_random_bounds == ALL_BOUNDS_SET) {
             lower_bound = bound(tc->key_size, true);
@@ -260,10 +262,8 @@ class cursor_bound_01 : public test {
             ret = range_cursor->bound(range_cursor.get(), lower_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
 
-            if (ret == EINVAL) {
+            if (ret == EINVAL)
                 lower_bound.clear();
-                range_cursor->bound(range_cursor.get(), "action=clear,bound=lower");
-            }
         }
 
         if (set_random_bounds == UPPER_BOUND_SET || set_random_bounds == ALL_BOUNDS_SET) {
@@ -272,15 +272,16 @@ class cursor_bound_01 : public test {
             ret = range_cursor->bound(range_cursor.get(), upper_bound.get_config().c_str());
             testutil_assert(ret == 0 || ret == EINVAL);
 
-            if (ret == EINVAL) {
+            if (ret == EINVAL)
                 upper_bound.clear();
-                range_cursor->bound(range_cursor.get(), "action=clear,bound=upper");
-            }
         }
 
-        if (upper_bound.get_key().empty() && lower_bound.get_key().empty()) {
-            range_cursor->bound(range_cursor.get(), "action=clear");
-        }
+        /*
+         * It is possible that upper bound and lower bound both get EINVAL, in that case clear all
+         * bounds.
+         */
+        if (upper_bound.get_key().empty() && lower_bound.get_key().empty())
+            testutil_check(range_cursor->bound(range_cursor.get(), "action=clear"));
 
         return std::make_pair(lower_bound, upper_bound);
     }
@@ -489,7 +490,7 @@ class cursor_bound_01 : public test {
     }
 
     void
-    insert_operation(thread_context *tc) override final
+    insert_operation(thread_worker *tc) override final
     {
         /* Each insert operation will insert new keys in the collections. */
         logger::log_msg(
@@ -500,24 +501,24 @@ class cursor_bound_01 : public test {
 
             collection &coll = tc->db.get_random_collection();
             scoped_cursor cursor = tc->session.open_scoped_cursor(coll.name);
-            tc->transaction.begin();
+            tc->txn.begin();
 
-            while (tc->transaction.active() && tc->running()) {
+            while (tc->txn.active() && tc->running()) {
 
                 /* Generate a random key. */
                 auto key = random_generator::instance().generate_random_string(tc->key_size);
                 auto value = random_generator::instance().generate_random_string(tc->value_size);
                 /* Insert a key/value pair. */
                 if (tc->insert(cursor, coll.id, key, value)) {
-                    if (tc->transaction.can_commit()) {
+                    if (tc->txn.can_commit()) {
                         /* We are not checking the result of commit as it is not necessary. */
-                        if (tc->transaction.commit())
+                        if (tc->txn.commit())
                             rollback_retries = 0;
                         else
                             ++rollback_retries;
                     }
                 } else {
-                    tc->transaction.rollback();
+                    tc->txn.rollback();
                     ++rollback_retries;
                 }
                 testutil_assert(rollback_retries < MAX_ROLLBACKS);
@@ -527,8 +528,8 @@ class cursor_bound_01 : public test {
             }
 
             /* Rollback any transaction that could not commit before the end of the test. */
-            if (tc->transaction.active())
-                tc->transaction.rollback();
+            if (tc->txn.active())
+                tc->txn.rollback();
 
             /* Reset our cursor to avoid pinning content. */
             testutil_check(cursor->reset(cursor.get()));
@@ -536,7 +537,7 @@ class cursor_bound_01 : public test {
     }
 
     void
-    update_operation(thread_context *tc) override final
+    update_operation(thread_worker *tc) override final
     {
         /* Each update operation will update existing keys in the collections. */
         logger::log_msg(
@@ -549,9 +550,9 @@ class cursor_bound_01 : public test {
             scoped_cursor cursor = tc->session.open_scoped_cursor(coll.name);
             scoped_cursor rnd_cursor =
               tc->session.open_scoped_cursor(coll.name, "next_random=true");
-            tc->transaction.begin();
+            tc->txn.begin();
 
-            while (tc->transaction.active() && tc->running()) {
+            while (tc->txn.active() && tc->running()) {
                 int ret = rnd_cursor->next(rnd_cursor.get());
 
                 /* It is possible not to find anything if the collection is empty. */
@@ -561,7 +562,7 @@ class cursor_bound_01 : public test {
                      * If we cannot find any record, finish the current transaction as we might be
                      * able to see new records after starting a new one.
                      */
-                    WT_IGNORE_RET_BOOL(tc->transaction.commit());
+                    WT_IGNORE_RET_BOOL(tc->txn.commit());
                     continue;
                 }
 
@@ -571,15 +572,15 @@ class cursor_bound_01 : public test {
                 /* Update the found key with a randomized value. */
                 auto value = random_generator::instance().generate_random_string(tc->value_size);
                 if (tc->update(cursor, coll.id, key, value)) {
-                    if (tc->transaction.can_commit()) {
+                    if (tc->txn.can_commit()) {
                         /* We are not checking the result of commit as it is not necessary. */
-                        if (tc->transaction.commit())
+                        if (tc->txn.commit())
                             rollback_retries = 0;
                         else
                             ++rollback_retries;
                     }
                 } else {
-                    tc->transaction.rollback();
+                    tc->txn.rollback();
                     ++rollback_retries;
                 }
                 testutil_assert(rollback_retries < MAX_ROLLBACKS);
@@ -589,8 +590,8 @@ class cursor_bound_01 : public test {
             }
 
             /* Rollback any transaction that could not commit before the end of the test. */
-            if (tc->transaction.active())
-                tc->transaction.rollback();
+            if (tc->txn.active())
+                tc->txn.rollback();
 
             /* Reset our cursor to avoid pinning content. */
             testutil_check(cursor->reset(cursor.get()));
@@ -598,7 +599,7 @@ class cursor_bound_01 : public test {
     }
 
     void
-    read_operation(thread_context *tc) override final
+    read_operation(thread_worker *tc) override final
     {
         /*
          * Each read operation will perform search nears with a range bounded cursor and a normal
@@ -608,34 +609,45 @@ class cursor_bound_01 : public test {
         logger::log_msg(
           LOG_INFO, type_string(tc->type) + " thread {" + std::to_string(tc->id) + "} commencing.");
 
-        bound lower_bound, upper_bound;
         std::map<uint64_t, scoped_cursor> cursors;
-
+        std::map<uint64_t, std::pair<bound, bound>> bounds;
         while (tc->running()) {
             /* Get a random collection to work on. */
             collection &coll = tc->db.get_random_collection();
 
             /* Find a cached cursor or create one if none exists. */
-            if (cursors.find(coll.id) == cursors.end())
+            if (cursors.find(coll.id) == cursors.end()) {
+                bound lower_bound, upper_bound;
                 cursors.emplace(coll.id, std::move(tc->session.open_scoped_cursor(coll.name)));
+                bounds.emplace(coll.id, std::move(std::make_pair(lower_bound, upper_bound)));
+            }
 
             /* Set random bounds on cached range cursor. */
             auto &range_cursor = cursors[coll.id];
-            auto bound_pair = set_random_bounds(tc, range_cursor);
+            auto &bound_pair = bounds[coll.id];
+            auto new_bound_pair = set_random_bounds(tc, range_cursor);
             /* Only update the bounds when the bounds have a key. */
-            lower_bound = bound_pair.first;
-            upper_bound = bound_pair.second;
+            if (!bound_pair.first.get_key().empty())
+                bound_pair.first = std::move(new_bound_pair.first);
+            if (!bound_pair.second.get_key().empty())
+                bound_pair.second = std::move(new_bound_pair.second);
+
+            /* Clear all bounds if both bounds doesn't have a key. */
+            if (new_bound_pair.first.get_key().empty() && new_bound_pair.second.get_key().empty()) {
+                bound_pair.first.clear();
+                bound_pair.second.clear();
+            }
 
             scoped_cursor normal_cursor = tc->session.open_scoped_cursor(coll.name);
-            wt_timestamp_t ts = tc->tsm->get_random_ts();
+            wt_timestamp_t ts = tc->tsm->get_valid_read_ts();
             /*
              * The oldest timestamp might move ahead and the reading timestamp might become invalid.
              * To tackle this issue, we round the timestamp to the oldest timestamp value.
              */
-            tc->transaction.begin(
+            tc->txn.begin(
               "roundup_timestamps=(read=true),read_timestamp=" + tc->tsm->decimal_to_hex(ts));
 
-            while (tc->transaction.active() && tc->running()) {
+            while (tc->txn.active() && tc->running()) {
                 /* Generate a random string. */
                 auto key_size = random_generator::instance().generate_integer(
                   static_cast<int64_t>(1), tc->key_size);
@@ -648,21 +660,21 @@ class cursor_bound_01 : public test {
                 testutil_assert(ret == 0 || ret == WT_NOTFOUND);
 
                 /* Verify the bound search_near result using the normal cursor. */
-                validate_bound_search_near(
-                  ret, exact, range_cursor, normal_cursor, srch_key, lower_bound, upper_bound);
+                validate_bound_search_near(ret, exact, range_cursor, normal_cursor, srch_key,
+                  bound_pair.first, bound_pair.second);
 
-                tc->transaction.add_op();
-                tc->transaction.try_rollback();
+                tc->txn.add_op();
+                tc->txn.try_rollback();
                 tc->sleep();
             }
         }
         /* Roll back the last transaction if still active now the work is finished. */
-        if (tc->transaction.active())
-            tc->transaction.rollback();
+        if (tc->txn.active())
+            tc->txn.rollback();
     }
 
     void
-    custom_operation(thread_context *tc) override final
+    custom_operation(thread_worker *tc) override final
     {
         /*
          * Each custom operation will use the range bounded cursor to traverse through existing keys
@@ -673,43 +685,54 @@ class cursor_bound_01 : public test {
           LOG_INFO, type_string(tc->type) + " thread {" + std::to_string(tc->id) + "} commencing.");
 
         std::map<uint64_t, scoped_cursor> cursors;
-        bound lower_bound, upper_bound;
+        std::map<uint64_t, std::pair<bound, bound>> bounds;
         while (tc->running()) {
             /* Get a random collection to work on. */
             collection &coll = tc->db.get_random_collection();
 
             /* Find a cached cursor or create one if none exists. */
-            if (cursors.find(coll.id) == cursors.end())
+            if (cursors.find(coll.id) == cursors.end()) {
+                bound lower_bound, upper_bound;
                 cursors.emplace(coll.id, std::move(tc->session.open_scoped_cursor(coll.name)));
+                bounds.emplace(coll.id, std::move(std::make_pair(lower_bound, upper_bound)));
+            }
 
             /* Set random bounds on cached range cursor. */
             auto &range_cursor = cursors[coll.id];
-            auto bound_pair = set_random_bounds(tc, range_cursor);
+            auto &bound_pair = bounds[coll.id];
+            auto new_bound_pair = set_random_bounds(tc, range_cursor);
             /* Only update the bounds when the bounds have a key. */
-            lower_bound = bound_pair.first;
-            upper_bound = bound_pair.second;
+            if (!bound_pair.first.get_key().empty())
+                bound_pair.first = std::move(new_bound_pair.first);
+            if (!bound_pair.second.get_key().empty())
+                bound_pair.second = std::move(new_bound_pair.second);
+
+            /* Clear all bounds if both bounds doesn't have a key. */
+            if (new_bound_pair.first.get_key().empty() && new_bound_pair.second.get_key().empty()) {
+                bound_pair.first.clear();
+                bound_pair.second.clear();
+            }
 
             scoped_cursor normal_cursor = tc->session.open_scoped_cursor(coll.name);
-            wt_timestamp_t ts = tc->tsm->get_random_ts();
+            wt_timestamp_t ts = tc->tsm->get_valid_read_ts();
             /*
              * The oldest timestamp might move ahead and the reading timestamp might become invalid.
              * To tackle this issue, we round the timestamp to the oldest timestamp value.
              */
-            tc->transaction.begin(
+            tc->txn.begin(
               "roundup_timestamps=(read=true),read_timestamp=" + tc->tsm->decimal_to_hex(ts));
-            while (tc->transaction.active() && tc->running()) {
-                cursor_traversal(range_cursor, normal_cursor, lower_bound, upper_bound, true);
-                // cursor_traversal(range_cursor, normal_cursor, lower_bound, upper_bound, false);
-                tc->transaction.add_op();
-                tc->transaction.try_rollback();
+            while (tc->txn.active() && tc->running()) {
+                cursor_traversal(
+                  range_cursor, normal_cursor, bound_pair.first, bound_pair.second, true);
+                cursor_traversal(
+                  range_cursor, normal_cursor, bound_pair.first, bound_pair.second, false);
+                tc->txn.add_op();
+                tc->txn.try_rollback();
                 tc->sleep();
             }
-            testutil_check(range_cursor->reset(range_cursor.get()));
         }
         /* Roll back the last transaction if still active now the work is finished. */
-        if (tc->transaction.active())
-            tc->transaction.rollback();
+        if (tc->txn.active())
+            tc->txn.rollback();
     }
 };
-
-} // namespace test_harness

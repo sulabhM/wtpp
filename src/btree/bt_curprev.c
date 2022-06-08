@@ -774,8 +774,6 @@ __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
     if (truncating)
         LF_SET(WT_READ_TRUNCATE);
 
-
-
     WT_ERR(__wt_cursor_func_init(cbt, false));
 
     /*
