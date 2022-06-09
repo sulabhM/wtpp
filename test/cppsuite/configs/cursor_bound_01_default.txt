@@ -39,12 +39,12 @@ workload_manager=
     remove_config=
     (
         op_rate=20ms,
-        thread_count=0
+        thread_count=1
     ),
     update_config=
     (
         op_rate=15ms,
-        thread_count=0,
+        thread_count=10,
         value_size=300
     ),
     custom_config=
