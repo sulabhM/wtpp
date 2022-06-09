@@ -320,12 +320,6 @@ restart_read:
         cbt->ins = __col_insert_search_match(cbt->ins_head, cbt->recno);
         __wt_upd_value_clear(cbt->upd_value);
 
-        if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_UPPER)) {
-            WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
-            /* Check that the key is within the range if bounds have been set. */
-            WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
-            //    return (WT_NOTFOUND);
-        }
         if (cbt->ins != NULL)
             WT_RET(__wt_txn_read_upd_list(session, cbt, cbt->ins->upd));
         if (cbt->upd_value->type != WT_UPDATE_INVALID) {
@@ -862,8 +856,9 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
         F_CLR(cursor, WT_CURSTD_BOUND_ENTRY);
         WT_RET(ret);
 
-        /* When search_near_bounded is implemented then remove this.
-         * If the search near returns a higher value, ensure it's within the upper bound.
+        /*
+         * When search_near_bounded is implemented then remove this. If the search near returns a
+         * higher value, ensure it's within the upper bound.
          */
         if (exact == 0 && F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE)) {
             return (0);

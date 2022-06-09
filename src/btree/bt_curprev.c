@@ -438,6 +438,21 @@ new_page:
             return (WT_NOTFOUND);
 
 restart_read:
+        if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
+            WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
+            WT_RET(__wt_struct_unpack(session, cbt->iface.lower_bound.data,
+              cbt->iface.lower_bound.size, "q", &recno_bound));
+            /* Check that the key is within the range if bounds have been set. */
+            if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                  cbt->recno < recno_bound) ||
+              (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
+                cbt->recno <= recno_bound)) {
+                *prefix_key_out_of_bounds = true;
+                WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
+                return (WT_NOTFOUND);
+            }
+        }
+
         /* Find the matching WT_COL slot. */
         if ((cip = __col_var_search(cbt->ref, cbt->recno, &rle_start)) == NULL)
             return (WT_NOTFOUND);
@@ -450,21 +465,6 @@ restart_read:
         if (cbt->ins != NULL) {
             if (F_ISSET(&cbt->iface, WT_CURSTD_KEY_ONLY))
                 return (0);
-
-            if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
-                WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-                WT_RET(__wt_struct_unpack(session, cbt->iface.lower_bound.data,
-                  cbt->iface.lower_bound.size, "q", &recno_bound));
-                /* Check that the key is within the range if bounds have been set. */
-                if ((F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
-                      cbt->recno < recno_bound) ||
-                  (!F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER_INCLUSIVE) &&
-                    cbt->recno <= recno_bound)) {
-                    *prefix_key_out_of_bounds = true;
-                    WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
-                    return (WT_NOTFOUND);
-                }
-            }
 
             WT_RET(__wt_txn_read_upd_list(session, cbt, cbt->ins->upd));
         }
@@ -531,7 +531,6 @@ restart_read:
 
         if (F_ISSET(&cbt->iface, WT_CURSTD_KEY_ONLY))
             return (0);
-
         /*
          * Read the on-disk value and/or history. Pass an update list: the update list may contain
          * the base update for a modify chain after rollback-to-stable, required for correctness.
@@ -785,8 +784,9 @@ __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
         F_CLR(cursor, WT_CURSTD_BOUND_ENTRY);
         WT_RET(ret);
 
-        /* When search_near_bounded is implemented then remove this.
-         * If the search near returns a higher value, ensure it's within the upper bound.
+        /*
+         * When search_near_bounded is implemented then remove this. If the search near returns a
+         * higher value, ensure it's within the upper bound.
          */
         if (exact == 0 && F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE)) {
             return (0);
@@ -794,7 +794,7 @@ __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
             if (F_ISSET(cursor, WT_CURSTD_BOUND_LOWER)) {
                 WT_RET(__wt_compare_bounds(session, cursor, btree->collator, false, &out_range));
                 if (out_range) {
-                    return WT_NOTFOUND;
+                    return (WT_NOTFOUND);
                 }
             }
             return (0);
