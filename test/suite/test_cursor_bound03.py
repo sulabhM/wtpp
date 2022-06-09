@@ -30,7 +30,7 @@ import wiredtiger, wttest
 from wtscenario import make_scenarios
 
 # test_cursor_bound03.py
-#    Test that setting bounds of different key formats works in the cursor bound API. Make
+# Test that setting bounds of different key formats works in the cursor bound API. Make
 # sure that WiredTiger complains when the upper and lower bounds overlap and that clearing the 
 # bounds through the bound API and reset calls work appriopately.
 class test_cursor_bound03(wttest.WiredTigerTestCase):
@@ -107,9 +107,24 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
             self.set_bounds(cursor,"upper")
         
         if (lower_key):
-            #Set lower bound to test that cursor positioning works.
             cursor.set_key(self.gen_key(lower_key))
             self.set_bounds(cursor,"lower")
+        
+        # if (upper_key):
+        #     #Set upper bound to test that cursor positioning works.
+        #     cursor.set_key(self.gen_key(upper_key))
+        #     self.set_bounds(cursor,"upper")
+            
+        #     ret = cursor.prev()
+        #     if ret != 0:
+        #         return
+        #     key = cursor.get_key()
+
+        #     if(self.inclusive):
+        #         self.assertEqual(int(key), int(upper_key))
+        #     else:
+        #         self.assertEqual(int(key), int(upper_key-1))
+
 
         count = ret = 0
         while True:
@@ -135,7 +150,7 @@ class test_cursor_bound03(wttest.WiredTigerTestCase):
                     self.assertTrue(self.gen_key(key) < self.gen_key(upper_key))
         self.assertEqual(expected_count, count)
         self.assertEqual(cursor.bound("action=clear"), 0)
-
+    
     def test_bound_next_early_exit(self):
         cursor = self.create_session_and_cursor()
         self.tty("NEXT TESTS----------------")

@@ -515,10 +515,11 @@ restart_read_insert:
                 return (WT_NOTFOUND);
             }
 
+            /* If an upper bound has been set ensure that the key is within the range, otherwise
+             * early exit. */
             if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
                 WT_RET(__wt_compare_bounds(session, cursor, btree->collator, true, &out_range));
-                /* Check that the key is within the range if bounds have been set. */
                 if (out_range) {
                     *prefix_key_out_of_bounds = true;
                     WT_STAT_CONN_DATA_INCR(session, cursor_bounds_next_early_exit);
@@ -573,11 +574,11 @@ restart_read_page:
          * If the cursor has prefix search configured we can early exit here if the key that we are
          * visiting is after our prefix.
          */
-        // if (prefix_search && __wt_prefix_match(prefix, cursor.key) < 0) {
-        //     *prefix_key_out_of_bounds = true;
-        //     WT_STAT_CONN_DATA_INCR(session, cursor_search_near_prefix_fast_paths);
-        //     return (WT_NOTFOUND);
-        // }
+        if (prefix_search && __wt_prefix_match(prefix, key) < 0) {
+            *prefix_key_out_of_bounds = true;
+            WT_STAT_CONN_DATA_INCR(session, cursor_search_near_prefix_fast_paths);
+            return (WT_NOTFOUND);
+        }
         if (F_ISSET(cursor, WT_CURSTD_BOUND_UPPER)) {
             WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.upper_bound));
             WT_RET(__wt_compare_bounds(session, cursor, btree->collator, true, &out_range));
@@ -849,18 +850,21 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
     total_skipped = 0;
 
     /*
-     * Checks that the cursor is currently unpositioned. If there is no active page, it's assumed
-     * that the cursor is not positioned yet.
+     * Checks if the cursor is currently positioned and positions it according to the bounds set. If
+     * the cursor is unpositioned, it will be positioned on the lower bound.
      */
-    if ((&cbt->ref->page) == NULL && F_ISSET(cursor, WT_CURSTD_BOUND_LOWER)) {
+    if ((&cbt->ref->page) == NULL && F_ISSET(cursor, WT_CURSTD_BOUND_LOWER) &&
+      !(F_ISSET(cursor, WT_CURSTD_BOUND_ENTRY))) {
         WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
-        /* Positioning the cursor to start at the lower bound if bounds have been set. */
         __wt_cursor_set_raw_key(cursor, &cursor->lower_bound);
-        WT_RET(cursor->search_near(cursor, &exact));
+        F_SET(cursor, WT_CURSTD_BOUND_ENTRY);
+        ret = cursor->search_near(cursor, &exact);
+        F_CLR(cursor, WT_CURSTD_BOUND_ENTRY);
+        WT_RET(ret);
 
-        /* When search_near_bounded is implemented then remove this.*/
-        /* Search near cannot return a lower value than the lower bound. */
-        /* If the search near returns a higher value, ensure it's within the upper bound. */
+        /* When search_near_bounded is implemented then remove this.
+         * If the search near returns a higher value, ensure it's within the upper bound.
+         */
         if (exact == 0 && F_ISSET(cursor, WT_CURSTD_BOUND_LOWER_INCLUSIVE)) {
             return (0);
         } else if (exact > 0) {
@@ -919,7 +923,6 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
             F_CLR(cbt, WT_CBT_ITERATE_APPEND);
             if (ret != WT_NOTFOUND)
                 break;
-
             /*
              * If we are doing a search near with prefix key configured, we need to check if we have
              * exited the next function due to a prefix key mismatch. If so, we can immediately
@@ -958,7 +961,6 @@ __wt_btcur_next_prefix(WT_CURSOR_BTREE *cbt, WT_ITEM *prefix, bool truncating)
                 WT_ASSERT(session, ret == WT_NOTFOUND);
                 break;
             }
-
             /*
              * Column-store pages may have appended entries. Handle it separately from the usual
              * cursor code, it's in a simple format.

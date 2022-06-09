@@ -653,11 +653,12 @@ restart_read_insert:
             if (F_ISSET(&cbt->iface, WT_CURSTD_KEY_ONLY))
                 return (0);
 
+            /* If a lower bound has been set ensure that the key is within the range, otherwise
+             * early exit. */
             if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
                 WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
                 WT_RET(
                   __wt_compare_bounds(session, &cbt->iface, btree->collator, false, &out_range));
-                /* Check that the key is within the range if bounds have been set. */
                 if (out_range) {
                     *prefix_key_out_of_bounds = true;
                     WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
@@ -713,10 +714,10 @@ restart_read_page:
         if (F_ISSET(&cbt->iface, WT_CURSTD_KEY_ONLY))
             return (0);
 
+        /* If an upper bound has been set ensure that the key is within the range. */
         if (F_ISSET(&cbt->iface, WT_CURSTD_BOUND_LOWER)) {
             WT_ASSERT(session, WT_DATA_IN_ITEM(&cbt->iface.lower_bound));
             WT_RET(__wt_compare_bounds(session, &cbt->iface, btree->collator, false, &out_range));
-            /* Check that the key is within the range if bounds have been set. */
             if (out_range) {
                 *prefix_key_out_of_bounds = true;
                 WT_STAT_CONN_DATA_INCR(session, cursor_bounds_prev_early_exit);
@@ -753,24 +754,57 @@ restart_read_page:
 int
 __wt_btcur_prev(WT_CURSOR_BTREE *cbt, bool truncating)
 {
+    WT_BTREE *btree;
     WT_CURSOR *cursor;
     WT_DECL_RET;
     WT_PAGE *page;
     WT_SESSION_IMPL *session;
     size_t total_skipped, skipped;
     uint32_t flags;
-    bool newpage, restart;
-    bool prefix_key_out_of_bounds;
+    int exact;
+    bool newpage, out_range, prefix_key_out_of_bounds, restart;
 
     cursor = &cbt->iface;
     session = CUR2S(cbt);
+    btree = S2BT(session);
+    exact = 0;
     total_skipped = 0;
     prefix_key_out_of_bounds = false;
 
+    /*
+     * Checks if the cursor is currently positioned and positions it according to the bounds set. If
+     * the cursor is unpositioned, it will be positioned on the lower bound.
+     */
+    if ((&cbt->ref->page) == NULL && F_ISSET(cursor, WT_CURSTD_BOUND_UPPER) &&
+      !(F_ISSET(cursor, WT_CURSTD_BOUND_ENTRY))) {
+        WT_ASSERT(session, WT_DATA_IN_ITEM(&cursor->upper_bound));
+
+        __wt_cursor_set_raw_key(cursor, &cursor->upper_bound);
+        F_SET(cursor, WT_CURSTD_BOUND_ENTRY);
+        ret = cursor->search_near(cursor, &exact);
+        F_CLR(cursor, WT_CURSTD_BOUND_ENTRY);
+        WT_RET(ret);
+
+        /* When search_near_bounded is implemented then remove this.
+         * If the search near returns a higher value, ensure it's within the upper bound.
+         */
+        if (exact == 0 && F_ISSET(cursor, WT_CURSTD_BOUND_UPPER_INCLUSIVE)) {
+            return (0);
+        } else if (exact < 0) {
+            if (F_ISSET(cursor, WT_CURSTD_BOUND_LOWER)) {
+                WT_RET(__wt_compare_bounds(session, cursor, btree->collator, false, &out_range));
+                if (out_range) {
+                    return WT_NOTFOUND;
+                }
+            }
+            return (0);
+        }
+    }
+
     WT_STAT_CONN_DATA_INCR(session, cursor_prev);
 
-    flags = /* tree walk flags */
-      WT_READ_NO_SPLIT | WT_READ_PREV | WT_READ_SKIP_INTL;
+    /* tree walk flags */
+    flags = WT_READ_NO_SPLIT | WT_READ_PREV | WT_READ_SKIP_INTL;
     if (truncating)
         LF_SET(WT_READ_TRUNCATE);
 
