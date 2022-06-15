@@ -701,7 +701,7 @@ __wt_txn_release(WT_SESSION_IMPL *session)
     __wt_txn_clear_read_timestamp(session);
     txn->isolation = session->isolation;
 
-    txn->rollback_reason = NULL;
+    txn->rollback_reason[0] = '\0';
 
     /*
      * Ensure the transaction flags are cleared on exit
@@ -2015,7 +2015,8 @@ __wt_txn_rollback(WT_SESSION_IMPL *session, const char *cfg[])
 int
 __wt_txn_rollback_required(WT_SESSION_IMPL *session, const char *reason)
 {
-    session->txn->rollback_reason = reason;
+    WT_IGNORE_RET(__wt_snprintf(
+      session->txn->rollback_reason, sizeof(session->txn->rollback_reason), "%s", reason));
     return (WT_ROLLBACK);
 }
 
@@ -2409,9 +2410,16 @@ __wt_txn_is_blocking(WT_SESSION_IMPL *session)
     /*
      * Check if either the transaction's ID or its pinned ID is equal to the oldest transaction ID.
      */
-    return (txn_shared->id == global_oldest || txn_shared->pinned_id == global_oldest ?
-        __wt_txn_rollback_required(session, WT_TXN_ROLLBACK_REASON_OLDEST_FOR_EVICTION) :
-        0);
+    if (txn_shared->id == global_oldest || txn_shared->pinned_id == global_oldest) {
+        WT_IGNORE_RET(
+          __wt_snprintf(session->txn->rollback_reason, sizeof(session->txn->rollback_reason),
+            "%s. Txn-dirty:%" PRIu64 " , Total-dirty:%" PRIu64 "",
+            WT_TXN_ROLLBACK_REASON_OLDEST_FOR_EVICTION, txn->bytes_dirty,
+            __wt_cache_dirty_inuse(S2C(session)->cache)));
+        return (WT_ROLLBACK);
+    }
+
+    return (0);
 }
 
 /*
@@ -2470,7 +2478,7 @@ __wt_verbose_dump_txn_one(
         __wt_timestamp_to_string(txn_shared->pinned_durable_timestamp, ts_string[4]),
         __wt_timestamp_to_string(txn_shared->read_timestamp, ts_string[5]), txn->ckpt_lsn.l.file,
         txn->ckpt_lsn.l.offset, txn->full_ckpt ? "true" : "false",
-        txn->rollback_reason == NULL ? "" : txn->rollback_reason, txn->flags, iso_tag));
+        txn->rollback_reason[0] == '\0' ? "" : txn->rollback_reason, txn->flags, iso_tag));
 
     /*
      * Log a message and return an error if error code and an optional error string has been passed.

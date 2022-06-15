@@ -1735,8 +1735,9 @@ __session_commit_transaction(WT_SESSION *wt_session, const char *config)
     /* Permit the commit if the transaction failed, but was read-only. */
     if (F_ISSET(txn, WT_TXN_ERROR) && txn->mod_count != 0)
         WT_ERR_MSG(session, EINVAL, "failed %s transaction requires rollback%s%s",
-          F_ISSET(txn, WT_TXN_PREPARE) ? "prepared " : "", txn->rollback_reason == NULL ? "" : ": ",
-          txn->rollback_reason == NULL ? "" : txn->rollback_reason);
+          F_ISSET(txn, WT_TXN_PREPARE) ? "prepared " : "",
+          txn->rollback_reason[0] == '\0' ? "" : ": ",
+          txn->rollback_reason[0] == '\0' ? "" : txn->rollback_reason);
 
 err:
     /*

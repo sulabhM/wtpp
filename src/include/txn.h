@@ -319,7 +319,9 @@ struct __wt_txn {
     /* Timeout */
     uint64_t operation_timeout_us;
 
-    const char *rollback_reason; /* If rollback, the reason */
+    /* Bytes dirtied because of this transaction */
+    uint64_t bytes_dirty;
+    char rollback_reason[1024]; /* If rollback, the reason */
 
 /*
  * WT_TXN_HAS_TS_COMMIT --

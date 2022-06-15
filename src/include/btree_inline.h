@@ -266,6 +266,9 @@ __wt_cache_page_inmem_incr(WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
 {
     WT_BTREE *btree;
     WT_CACHE *cache;
+    WT_TXN *txn;
+
+    txn = session->txn;
 
     WT_ASSERT(session, size < WT_EXABYTE);
     btree = S2BT(session);
@@ -296,9 +299,23 @@ __wt_cache_page_inmem_incr(WT_SESSION_IMPL *session, WT_PAGE *page, size_t size)
             if (WT_PAGE_IS_INTERNAL(page)) {
                 (void)__wt_atomic_add64(&cache->bytes_dirty_intl, size);
                 (void)__wt_atomic_add64(&btree->bytes_dirty_intl, size);
+                /*
+                 * If this is an application thread and there is a running txn, keep an account of
+                 * dirty data being added.
+                 */
+                if (!F_ISSET(session, WT_SESSION_INTERNAL) &&
+                  F_ISSET(txn, WT_TXN_RUNNING | WT_TXN_HAS_ID))
+                    txn->bytes_dirty += size;
             } else if (!btree->lsm_primary) {
                 (void)__wt_atomic_add64(&cache->bytes_dirty_leaf, size);
                 (void)__wt_atomic_add64(&btree->bytes_dirty_leaf, size);
+                /*
+                 * If this is an application thread and there is a running txn, keep an account of
+                 * dirty data being added.
+                 */
+                if (!F_ISSET(session, WT_SESSION_INTERNAL) &&
+                  F_ISSET(txn, WT_TXN_RUNNING | WT_TXN_HAS_ID))
+                    txn->bytes_dirty += size;
             }
             (void)__wt_atomic_addsize(&page->modify->bytes_dirty, size);
         }
