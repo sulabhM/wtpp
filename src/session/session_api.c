@@ -1971,7 +1971,7 @@ __session_get_rollback_reason(WT_SESSION *wt_session)
 
     session = (WT_SESSION_IMPL *)wt_session;
 
-    return (session->txn->rollback_reason);
+    return (session->txn->rollback_reason[0] == '\0' ? NULL : session->txn->rollback_reason);
 }
 
 /*
