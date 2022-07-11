@@ -426,8 +426,8 @@ functions:
         set -o errexit
         set -o verbose
         cd cmake_build
-        # At 5 seconds per run 5000 runs comes out to ~7 hours which is less than our 8 hour timeout
-        for i in $(seq 5000); do
+        # At 5 seconds per run 1000 runs comes out to ~7 hours which is less than our 8 hour timeout
+        for i in $(seq 1000); do
           ${test_env_vars|} ${python_binary|python3} ../test/suite/run.py ${unit_test_args|-v 2} ${smp_command|} test_bug010 2>&1
         done
 

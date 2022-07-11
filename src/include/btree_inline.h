@@ -789,6 +789,7 @@ __wt_page_modify_set(WT_SESSION_IMPL *session, WT_PAGE *page)
      * Prepared records in the datastore require page updates, even for read-only handles, don't
      * mark the tree or page dirty.
      */
+
     if (F_ISSET(S2BT(session), WT_BTREE_READONLY))
         return;
 
@@ -800,6 +801,7 @@ __wt_page_modify_set(WT_SESSION_IMPL *session, WT_PAGE *page)
     __wt_tree_modify_set(session);
 
     __wt_page_only_modify_set(session, page);
+    usleep(200000);
 }
 
 /*
