@@ -37,12 +37,12 @@ import threading
 class test_bug010(wttest.WiredTigerTestCase):
     name = 'test_bug010'
     uri = 'table:' + name
-    num_tables = 1
+    num_tables = 100
     #2000 if wttest.islongtest() else 200
 
     # Disable checkpoint sync, to make checkpoints faster and
     # increase the likelihood of triggering the symptom
-    conn_config = 'checkpoint_sync=false'
+    conn_config = 'checkpoint_sync=false,timing_stress_for_test=[checkpoint_slow]'
 
     def test_checkpoint_dirty(self):
         # Create a lot of tables

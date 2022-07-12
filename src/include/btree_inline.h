@@ -801,7 +801,7 @@ __wt_page_modify_set(WT_SESSION_IMPL *session, WT_PAGE *page)
     __wt_tree_modify_set(session);
 
     __wt_page_only_modify_set(session, page);
-    usleep(200000);
+    usleep(2000000);
 }
 
 /*
