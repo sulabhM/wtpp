@@ -1,0 +1,29 @@
+# Configuration for test_bug010.
+duration_seconds=5,
+cache_size_mb=250,
+workload_manager=
+(
+    checkpoint_config=
+    (
+        op_rate=5s,
+    ),
+    populate_config=
+    (
+        collection_count=1,
+        key_count_per_collection=1,
+        key_size=5,
+        thread_count=1,
+        value_size=5
+    ),
+    update_config=
+    (
+        op_rate=500ms,
+        ops_per_transaction=(max=1,min=1),
+        thread_count=1,
+        value_size=5
+    ),
+),
+operation_tracker=
+(
+    enabled=false,
+)

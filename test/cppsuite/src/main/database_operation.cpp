@@ -35,6 +35,8 @@
 #include "src/main/validator.h"
 #include "src/storage/connection_manager.h"
 
+#include <iostream>
+
 namespace test_harness {
 /* Static methods. */
 static void
@@ -57,6 +59,7 @@ populate_worker(thread_worker *tc)
             if (tc->insert(cursor, coll.id, key, value)) {
                 if (tc->txn.commit()) {
                     ++j;
+                    std::cout << "Committed key " << j << std::endl;
                 }
             } else {
                 tc->txn.rollback();
@@ -91,12 +94,14 @@ database_operation::populate(
       LOG_INFO, "Populate: creating " + std::to_string(collection_count) + " collections.");
 
     /* Create n collections as per the configuration. */
-    for (int64_t i = 0; i < collection_count; ++i)
+    for (int64_t i = 0; i < collection_count; ++i) {
         /*
          * The database model will call into the API and create the collection, with its own
          * session.
          */
         database.add_collection(key_count);
+        std::cout << "Added " << (i+1)<< " collection" << std::endl;
+    }
 
     logger::log_msg(
       LOG_INFO, "Populate: " + std::to_string(collection_count) + " collections created.");
@@ -387,6 +392,7 @@ database_operation::update_operation(thread_worker *tc)
         auto key_id =
           random_generator::instance().generate_integer<uint64_t>(0, coll.get_key_count() - 1);
         auto key = tc->pad_string(std::to_string(key_id), tc->key_size);
+        std::cout << "Updating key " << key << " of collection " << coll.id << std::endl;
         auto value = random_generator::instance().generate_pseudo_random_string(tc->value_size);
         if (!tc->update(cursor, coll.id, key, value)) {
             tc->txn.rollback();
