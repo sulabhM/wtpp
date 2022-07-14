@@ -1,0 +1,11 @@
+# Configuration for test_bug010.
+duration_seconds=5,
+cache_size_mb=250,
+
+workload_manager=
+(
+    populate_config=
+    (
+        collection_count=1,
+    ),
+)
