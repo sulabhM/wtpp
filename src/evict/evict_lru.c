@@ -994,17 +994,13 @@ __evict_get_ref(
     WT_REF *ref;
     WT_REF_STATE previous_state;
     uint32_t i, iter, j, max_level;
-    bool dhandle_list_locked;
-    uint64_t loop_count;
 
     *btreep = NULL;
     bucketset = NULL;
     conn = S2C(session);
     dhandle = NULL;
-    dhandle_list_locked = false;
     evict = conn->evict;
     iter = 0;
-    loop_count = 0;
     max_level = 0;
     previous_state = 0;
     /*
@@ -1014,36 +1010,12 @@ __evict_get_ref(
     *previous_statep = WT_REF_MEM;
     *refp = ref = NULL;
 
-    /*
-     * Pick a dhandle from which to evict. The function picking the handle dictates the priority
-     * order for eviction.
-     */
-    while (loop_count++ < conn->dhandle_count) {
-        /* We're done if shutting down or reconfiguring. */
-        if (F_ISSET(conn, WT_CONN_CLOSING) || F_ISSET(conn, WT_CONN_RECONFIGURING))
-            goto done;
-
-        /*
-         * Lock the dhandle list to find the next handle and bump its reference count to keep it
-         * alive while we use it.
-         */
-        if (!dhandle_list_locked) {
-            WT_ERR(__evict_lock_handle_list(session));
-            dhandle_list_locked = true;
-        }
-        __evict_choose_dhandle(session, &dhandle);
-        if (dhandle == NULL)
-            continue;
-    }
-    __wt_readunlock(session, &conn->dhandle_lock);
-    dhandle_list_locked = false;
+    __evict_choose_dhandle(session, &dhandle);
 
     if (dhandle == NULL) {
-        ret = WT_NOTFOUND;
         WT_STAT_CONN_INCR(session, eviction_get_ref_no_dhandle);
-        goto err;
-    } else
-        (void)__wt_atomic_addi32(&dhandle->session_inuse, 1);
+        return (WT_NOTFOUND);
+    }
 
     WT_ASSERT(session, WT_DHANDLE_BTREE(dhandle));
     WT_ASSERT(session, ((WT_BTREE*)(dhandle->handle))->evict_data.initialized);
@@ -1158,8 +1130,8 @@ done:
          * Increment the busy count in the btree handle to prevent it from being closed under us.
          */
         (void)__wt_atomic_addv32(&((*btreep)->evict_data.evict_busy), 1);
-        if (i == 1)
-            printf("read_gen = %d, bucket = %d\n", (int)ref->page->evict_data.read_gen, (int) j);
+//        if (i == 1)
+//            printf("read_gen = %d, bucket = %d\n", (int)ref->page->evict_data.read_gen, (int) j);
     } else
         WT_STAT_CONN_INCR(session, eviction_get_ref_empty);
 
@@ -1174,9 +1146,6 @@ done:
 //      __evict_page_consistency_check(session,  ref->page->evict_data.dhandle, ref->page, false, true);
 #endif
 
-err:
-    if (dhandle_list_locked)
-        __wt_readunlock(session, &conn->dhandle_lock);
     return (ret);
 }
 
@@ -2010,14 +1979,15 @@ __evict_choose_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE **dhandle_p)
     uint64_t  bytes_inmem, max_cache_footprint;
 #endif
 
-    best_dhandle = NULL;
+    best_dhandle = *dhandle_p = NULL;
     conn = S2C(session);
     evict = conn->evict;
 #ifdef EVICT_MAX_FOOTPRINT
     max_cache_footprint = 0;
 #endif
 
-    WT_ASSERT(session, __wt_rwlock_islocked(session, &conn->dhandle_lock));
+    if (__evict_lock_handle_list(session) != 0)
+        return;
 
     dhandle = TAILQ_FIRST(&conn->dhqh);
     for (uint64_t i = 0; i < conn->dhandle_count; i++) {
@@ -2085,6 +2055,12 @@ __evict_choose_dhandle(WT_SESSION_IMPL *session, WT_DATA_HANDLE **dhandle_p)
     next:
         dhandle = TAILQ_NEXT(dhandle, q);
     }
+
+    if (best_dhandle != NULL)
+        (void)__wt_atomic_addi32(&best_dhandle->session_inuse, 1);
+
+    __wt_readunlock(session, &conn->dhandle_lock);
+
     *dhandle_p = best_dhandle;
 }
 
