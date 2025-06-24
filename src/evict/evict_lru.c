@@ -789,9 +789,10 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
     WT_EVICT *evict;
     WT_TRACK_OP_DECL;
     WT_TXN_GLOBAL *txn_global;
-    uint64_t eviction_progress, oldest_id, prev_oldest_id;
+    uint64_t eviction_progress, oldest_id, prev_oldest_id, evicted_pages_new, evicted_pages_prev;
     uint64_t time_now, time_prev;
     u_int loop;
+    static int count;
 
     WT_TRACK_OP_INIT(session);
     conn = S2C(session);
@@ -801,7 +802,8 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
     time_prev = 0; /* [-Wconditional-uninitialized] */
 
     /* Track whether pages are being evicted and progress is made. */
-    eviction_progress = __wt_atomic_loadv64(&evict->eviction_progress);
+    evicted_pages_prev = __wt_atomic_loadv64(&evict->evicted_pages); /* XXX */
+    eviction_progress = __wt_atomic_loadv64(&evict->eviction_progress); /* XXX */
     prev_oldest_id = __wt_atomic_loadv64(&txn_global->oldest_id);
 
     for (loop = 0;; loop++) {
@@ -810,12 +812,17 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
             time_prev = time_now;
 
         __evict_tune_workers(session);
-        /*
-         * Increment the shared read generation. Do this occasionally even if eviction is not
-         * currently required, so that pages have some relative read generation when the eviction
-         * server does need to do some work.
-         */
-        __wt_atomic_add64(&evict->read_gen, 1);
+
+        /* Increment the shared read generation if eviction is chasing newer pages. */
+        if ((evicted_pages_new = __wt_atomic_loadv64(&evict->evicted_pages)) - evicted_pages_prev > 20) {
+//            delta = (evicted_pages_new - evicted_pages_prev);
+//            printf("Evicted prev = %" PRIu64 ", evicted new %" PRIu64 ", delta = %" PRIu64 "\n",
+//                   evicted_pages_prev, evicted_pages_new, delta);
+            __wt_atomic_add64(&evict->read_gen, 1);
+            evicted_pages_prev = evicted_pages_new;
+        }
+        if (count++ % 100000 == 0)
+            printf("server read gen is %" PRIu64 "\n", evict->read_gen);
 
         /*
          * Update the oldest ID: we use it to decide whether pages are candidates for eviction.
@@ -1208,8 +1215,8 @@ __evict_page(WT_SESSION_IMPL *session)
                 WT_STAT_CONN_INCR(session, eviction_app_dirty_fail);
             WT_STAT_CONN_INCR(session, eviction_app_fail);
         }
-    }
-
+    } else
+        __wt_atomic_addv64(&S2C(session)->evict->evicted_pages, 1);
 
     /*
      * Help ordering the buckets by opportunistically moving pages to the right buckets if they

@@ -26,6 +26,8 @@ struct __wt_evict {
     uint64_t app_waits;  /* User threads waited for eviction */
     uint64_t app_evicts; /* Pages evicted by user threads */
 
+    uint64_t evicted_pages; /* The number of evicted pages */
+
     wt_shared uint64_t evict_max_page_size; /* Largest page seen at eviction */
     wt_shared uint64_t evict_max_ms;        /* Longest milliseconds spent at a single eviction */
     uint64_t reentry_hs_eviction_ms;        /* Total milliseconds spent inside a nested eviction */
