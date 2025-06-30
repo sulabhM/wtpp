@@ -1829,7 +1829,13 @@ __wt_evict_enqueue_page(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT_RE
     if (previous_state == WT_REF_LOCKED && WT_REF_OWNER(ref) == (uint64_t)session)
         must_unlock_ref = false;
     else if (previous_state == WT_REF_LOCKED) {
-        /* Page is locked, but not by us. Someone is already enqueueing of evicting it. Bail. */
+        /*
+         * Page is locked, but not by us. Chances are, someone is already enqueueing, evicting
+         * or deleting it. Bail. Could there be an esoteric scenario where the page ends up
+         * absent from eviction queues at all? Possibly, though I can't think of one. If this
+         * does occur, this means that this page won't be eviction until it is deleted, reconciled
+         * or we close the tree. These scenarios will be rare, so we won't worry about them.
+         */
         return;
     } else/* We must lock */ {
         WT_REF_LOCK(session, ref, &previous_state);
