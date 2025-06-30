@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2014-present MongoDB, Inc.
  * Copyright (c) 2008-2014 WiredTiger, Inc.
- *	All rights reserved.
+ *  All rights reserved.
  *
  * See the file LICENSE for redistribution information.
  */
@@ -87,14 +87,14 @@ __ref_track_state(
 
 static WT_INLINE void
 __wt_ref_make_visible(WT_SESSION_IMPL *session, WT_REF *ref) {
-	/*
-	 * It is absolutely essential that we reset the owner before making the page
-	 * visible. Failing to do so will lead to bad race conditions where the
-	 * thread that just created a new page races with a thread that tries to
-	 * evict the same page.
-	 */
-	__atomic_store_n(&ref->owner, 0, __ATOMIC_RELEASE);
-	WT_REF_SET_STATE(ref, WT_REF_MEM);
+    /*
+     * It is absolutely essential that we reset the owner before making the page
+     * visible. Failing to do so will lead to bad race conditions where the
+     * thread that just created a new page races with a thread that tries to
+     * evict the same page.
+     */
+    __atomic_store_n(&ref->owner, 0, __ATOMIC_RELEASE);
+    WT_REF_SET_STATE(ref, WT_REF_MEM);
 }
 
 /*
@@ -107,18 +107,6 @@ __ref_get_state(WT_REF *ref)
     return (__wt_atomic_loadv8(&ref->__state));
 }
 
-/*
- * __ref_get_state_strict --
- *     Get a ref's state variable with sequential consistency ordering.
- */
-static WT_INLINE WT_REF_STATE
-__ref_get_state_strict(WT_REF *ref)
-{
-    return (__atomic_load_n(&ref->__state, __ATOMIC_ACQUIRE));
-}
-
-
-#define WT_REF_GET_STATE_STRICT(ref) __ref_get_state_strict((ref))
 #define WT_REF_GET_STATE(ref) __ref_get_state((ref))
 #define WT_REF_OWNER(ref) (__atomic_load_n(&ref->owner, __ATOMIC_ACQUIRE))
 
@@ -137,10 +125,10 @@ __ref_cas_state(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE old_state,
     WT_UNUSED(func);
     WT_UNUSED(line);
 
-	/* If we have the reference locked and we are about to unlock it, reset the owner first */
-	if (old_state == WT_REF_LOCKED && new_state != WT_REF_LOCKED &&
-		WT_REF_OWNER(ref) == (uint64_t)session)
-		__atomic_store_n(&ref->owner, 0, __ATOMIC_RELEASE);
+    /* If we have the reference locked and we are about to unlock it, reset the owner first */
+    if (old_state == WT_REF_LOCKED && new_state != WT_REF_LOCKED &&
+        WT_REF_OWNER(ref) == (uint64_t)session)
+        __atomic_store_n(&ref->owner, 0, __ATOMIC_RELEASE);
 
     cas_result = __wt_atomic_casv8(&ref->__state, old_state, new_state);
 
@@ -152,19 +140,19 @@ __ref_cas_state(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE old_state,
     if (cas_result)
         __ref_track_state(session, ref, new_state, func, line);
 #endif
-	if (cas_result && new_state == WT_REF_LOCKED)
-		__atomic_store_n(&ref->owner, (uint64_t)session, __ATOMIC_RELEASE);
+    if (cas_result && new_state == WT_REF_LOCKED)
+        __atomic_store_n(&ref->owner, (uint64_t)session, __ATOMIC_RELEASE);
 
 #if 0
-	if (cas_result) {
-		printf("session %d SUCCESS to CAS STATE from %d to %d on page %p,  func %s, line %d\n",
-			   (int)session->id, old_state, new_state, (ref->page == NULL)? 0 : (void*)ref->page,
-			   func, line);
-	}
-	else
-		printf("session %d FAIL to CAS STATE from %d to %d on page %p,  func %s, line %d\n", (int)session->id,
-			   old_state, new_state, (ref->page == NULL)? 0 : (void*)ref->page, func, line);
-	fflush(stdout);
+    if (cas_result) {
+        printf("session %d SUCCESS to CAS STATE from %d to %d on page %p,  func %s, line %d\n",
+               (int)session->id, old_state, new_state, (ref->page == NULL)? 0 : (void*)ref->page,
+               func, line);
+    }
+    else
+        printf("session %d FAIL to CAS STATE from %d to %d on page %p,  func %s, line %d\n", (int)session->id,
+               old_state, new_state, (ref->page == NULL)? 0 : (void*)ref->page, func, line);
+    fflush(stdout);
 #endif
 
     return (cas_result);
@@ -183,7 +171,7 @@ __ref_lock(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE *previous_statep)
 {
     WT_REF_STATE previous_state;
     for (;; __wt_yield()) {
-        previous_state = WT_REF_GET_STATE_STRICT(ref);
+        previous_state = WT_REF_GET_STATE(ref);
         if (previous_state != WT_REF_LOCKED &&
           WT_REF_CAS_STATE(session, ref, previous_state, WT_REF_LOCKED))
             break;
@@ -194,8 +182,8 @@ __ref_lock(WT_SESSION_IMPL *session, WT_REF *ref, WT_REF_STATE *previous_statep)
 #define WT_REF_LOCK(session, ref, previous_statep) __ref_lock((session), (ref), (previous_statep))
 
 #define WT_REF_UNLOCK(ref, state) \
-	do {											\
-		__atomic_store_n(&ref->owner, 0, __ATOMIC_SEQ_CST); \
-		WT_REF_SET_STATE(ref, state);						\
-	}  while(0)
+    do {                                            \
+        __atomic_store_n(&ref->owner, 0, __ATOMIC_SEQ_CST); \
+        WT_REF_SET_STATE(ref, state);                       \
+    }  while(0)
 

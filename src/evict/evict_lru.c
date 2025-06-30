@@ -815,9 +815,6 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
 
         /* Increment the shared read generation if eviction is chasing newer pages. */
         if ((evicted_pages_new = __wt_atomic_loadv64(&evict->evicted_pages)) - evicted_pages_prev > 20) {
-//            delta = (evicted_pages_new - evicted_pages_prev);
-//            printf("Evicted prev = %" PRIu64 ", evicted new %" PRIu64 ", delta = %" PRIu64 "\n",
-//                   evicted_pages_prev, evicted_pages_new, delta);
             __wt_atomic_add64(&evict->read_gen, 1);
             evicted_pages_prev = evicted_pages_new;
         }
@@ -1402,7 +1399,7 @@ void
 __wt_evict_page_urgent(WT_SESSION_IMPL *session, WT_REF *ref)
 {
     WT_ASSERT(session, session->dhandle != NULL);
-    __wt_evict_touch_page(session, session->dhandle, ref, false, true /* won't need */);
+    __wt_evict_touch_page(session, ref, false, true /* won't need */);
     if (WT_EVICT_HAS_WORKERS(session))
         __wt_cond_signal(session, S2C(session)->evict_threads.wait_cond);
     else
@@ -1690,7 +1687,7 @@ __wt_evict_remove(WT_SESSION_IMPL *session, WT_REF *ref, bool destroying)
     if (WT_EVICT_PAGE_CLEARED(page))
         return;
 
-    if (WT_REF_GET_STATE_STRICT(ref) == WT_REF_LOCKED && WT_REF_OWNER(ref) == (uint64_t)session) {
+    if (WT_REF_GET_STATE(ref) == WT_REF_LOCKED && WT_REF_OWNER(ref) == (uint64_t)session) {
         /* The ref is already locked by us */
 #if EVICT_DEBUG_PRINT
         printf("ref for page %p %s (type %d) already locked in __wt_evict_remove by session %d\n",
@@ -1764,7 +1761,7 @@ __evict_page_consistency_check(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle
         return (false);
     }
     if (!new) {
-        if ((state = WT_REF_GET_STATE_STRICT(page->ref)) != WT_REF_LOCKED && state != WT_REF_MEM) {
+        if ((state = WT_REF_GET_STATE(page->ref)) != WT_REF_LOCKED && state != WT_REF_MEM) {
             if (verbose)
                 WT_RET(__wt_msg(session, "page %s %p state is neither locked nor in-memory\n",
                                 __wt_page_type_string(page->type), (void*)page));
@@ -1831,7 +1828,10 @@ __wt_evict_enqueue_page(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT_RE
      */
     if (previous_state == WT_REF_LOCKED && WT_REF_OWNER(ref) == (uint64_t)session)
         must_unlock_ref = false;
-    else /* We must lock */ {
+    else if (previous_state == WT_REF_LOCKED) {
+        /* Page is locked, but not by us. Someone is already enqueueing of evicting it. Bail. */
+        return;
+    } else/* We must lock */ {
         WT_REF_LOCK(session, ref, &previous_state);
         must_unlock_ref = true;
     }
@@ -1893,8 +1893,7 @@ done:
  *     not be needed in the future. If true, the page is marked for forced eviction.
  */
 void
-__wt_evict_touch_page(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT_REF *ref,
-  bool internal_only, bool wont_need)
+__wt_evict_touch_page(WT_SESSION_IMPL *session, WT_REF *ref, bool internal_only, bool wont_need)
 {
     WT_PAGE *page;
     bool bumped;
@@ -1909,11 +1908,11 @@ __wt_evict_touch_page(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT_REF 
             __wt_atomic_store64(&page->evict_data.read_gen, WT_READGEN_WONT_NEED);
         else
             __evict_read_gen_new(session, page);
-        __wt_evict_enqueue_page(session, dhandle, ref);
+        __wt_evict_enqueue_page(session, session->dhandle, ref);
     } else if (!internal_only) {
         bumped = __wti_evict_read_gen_bump(session, page);
         if (bumped)
-            __wt_evict_enqueue_page(session, dhandle, ref);
+            __wt_evict_enqueue_page(session, session->dhandle, ref);
     }
 }
 
@@ -2157,10 +2156,8 @@ __evict_skip_page(WT_SESSION_IMPL *session, WT_REF *ref)
      * read instantiating the page. Set the page's read generation here to ensure a bug doesn't
      * somehow leave a page without a read generation.
      */
-    if (__wt_atomic_load64(&page->evict_data.read_gen) == WT_READGEN_NOTSET) {
-        printf("touch evict_skip\n");
-        __wt_evict_touch_page(session, btree->dhandle, ref, false, false);
-    }
+    if (__wt_atomic_load64(&page->evict_data.read_gen) == WT_READGEN_NOTSET)
+        __wt_evict_touch_page(session, ref, false, false);
 
     want_page = (F_ISSET(evict, WT_EVICT_CACHE_CLEAN) && !modified) ||
       (F_ISSET(evict, WT_EVICT_CACHE_DIRTY) && modified) ||

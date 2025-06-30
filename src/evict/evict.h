@@ -150,8 +150,8 @@ extern void __wt_evict_priority_set(WT_SESSION_IMPL *session, uint64_t v);
 extern void __wt_evict_remove(WT_SESSION_IMPL *session, WT_REF *ref, bool destroying);
 extern void __wt_evict_server_wake(WT_SESSION_IMPL *session);
 extern void __wt_evict_stats_update(WT_SESSION_IMPL *session);
-extern void __wt_evict_touch_page(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT_REF *ref,
-  bool internal_only, bool wont_need);
+extern void __wt_evict_touch_page(
+  WT_SESSION_IMPL *session, WT_REF *ref, bool internal_only, bool wont_need);
 static WT_INLINE bool __wt_evict_aggressive(WT_SESSION_IMPL *session)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 static WT_INLINE bool __wt_evict_cache_stuck(WT_SESSION_IMPL *session)
