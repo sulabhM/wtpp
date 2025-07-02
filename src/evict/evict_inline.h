@@ -153,8 +153,12 @@ __evict_page_get_bucketset(WT_SESSION_IMPL *session, WT_DATA_HANDLE *dhandle, WT
     }
 
     /* Find the right bucketset level for the page */
-    if (__wt_atomic_load64(&page->evict_data.read_gen) == WT_READGEN_WONT_NEED)
-        correct_bucketset_level = WT_EVICT_LEVEL_WONT_NEED;
+    if (__wt_atomic_load64(&page->evict_data.read_gen) == WT_READGEN_WONT_NEED) {
+        if (!WT_PAGE_IS_INTERNAL(page))
+            correct_bucketset_level = WT_EVICT_LEVEL_WONT_NEED_LEAF;
+        else
+            correct_bucketset_level = WT_EVICT_LEVEL_WONT_NEED_INTERNAL;
+    }
     else if (!WT_PAGE_IS_INTERNAL(page) && !__wt_page_is_modified(page))
         correct_bucketset_level = WT_EVICT_LEVEL_CLEAN_LEAF;
     else if (WT_PAGE_IS_INTERNAL(page) && !__wt_page_is_modified(page))
