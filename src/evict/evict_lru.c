@@ -1041,8 +1041,7 @@ __evict_get_ref(
     if (F_ISSET(evict, WT_EVICT_CACHE_DIRTY))
         max_level = WT_EVICT_LEVEL_DIRTY_INTERNAL;
 
-    for (i = 0; i < max_level; i++) {
-        /* XXX We always evict below the max level. Choose the max level with some probability. */
+    for (i = 0; i <= max_level; i++) {
         bucketset = WT_DHANDLE_TO_BUCKETSET(dhandle, i);
         for (j = __wt_atomic_load32(&bucketset->bucket_last_considered) % WT_EVICT_NUM_BUCKETS, iter = 0;
              iter++ < WT_EVICT_NUM_BUCKETS; j = (j+1) % WT_EVICT_NUM_BUCKETS) {
