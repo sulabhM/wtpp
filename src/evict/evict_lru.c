@@ -792,7 +792,6 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
     uint64_t eviction_progress, oldest_id, prev_oldest_id, evicted_pages_new, evicted_pages_prev;
     uint64_t time_now, time_prev;
     u_int loop;
-    static int count;
 
     WT_TRACK_OP_INIT(session);
     conn = S2C(session);
@@ -817,9 +816,8 @@ __evict_server(WT_SESSION_IMPL *session, bool *did_work)
         if ((evicted_pages_new = __wt_atomic_loadv64(&evict->evicted_pages)) - evicted_pages_prev > 20) {
             __wt_atomic_add64(&evict->read_gen, 1);
             evicted_pages_prev = evicted_pages_new;
+            WT_STAT_CONN_SET(session, eviction_server_readgen, evict->read_gen);
         }
-        if (count++ % 100000 == 0)
-            printf("server read gen is %" PRIu64 "\n", evict->read_gen);
 
         /*
          * Update the oldest ID: we use it to decide whether pages are candidates for eviction.

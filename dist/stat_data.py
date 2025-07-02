@@ -318,6 +318,7 @@ conn_stats = [
     EvictStat('eviction_pages_in_parallel_with_checkpoint', 'pages evicted in parallel with checkpoint'),
     EvictStat('eviction_pages_queued_urgent_hs_dirty', 'pages queued for urgent eviction from history store due to high dirty content'),
     EvictStat('eviction_reentry_hs_eviction_milliseconds', 'total milliseconds spent inside reentrant history store evictions in a reconciliation', 'no_clear,no_scale,size'),
+    EvictStat('eviction_server_readgen', 'eviction server read generation value'),
     EvictStat('eviction_skip_checkpointing_trees', 'eviction skips trees that are being checkpointed'),
     EvictStat('eviction_skip_dirty_pages_during_checkpoint', 'eviction skips dirty pages during a running checkpoint'),
     EvictStat('eviction_skip_intl_page_with_active_child', 'eviction skips internal pages as it has an active child'),

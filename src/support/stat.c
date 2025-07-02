@@ -1415,6 +1415,7 @@ static const char *const __stats_connection_desc[] = {
   "cache: eviction gave up due to no progress being made",
   "cache: eviction making slow progress",
   "cache: eviction renumbered buckets",
+  "cache: eviction server read generation value",
   "cache: eviction skipped a page that was locked or evicted",
   "cache: eviction skipped a page with a skip flag set",
   "cache: eviction skips dirty pages during a running checkpoint",
@@ -2153,6 +2154,7 @@ __wt_stat_connection_clear_single(WT_CONNECTION_STATS *stats)
     stats->cache_eviction_blocked_no_progress = 0;
     stats->eviction_slow = 0;
     stats->eviction_renumbered_buckets = 0;
+    stats->eviction_server_readgen = 0;
     stats->eviction_skip_pages_locked_or_evicted = 0;
     stats->eviction_skip_pages_flag = 0;
     stats->eviction_skip_dirty_pages_during_checkpoint = 0;
@@ -2860,6 +2862,7 @@ __wt_stat_connection_aggregate(WT_CONNECTION_STATS **from, WT_CONNECTION_STATS *
       WT_STAT_CONN_READ(from, cache_eviction_blocked_no_progress);
     to->eviction_slow += WT_STAT_CONN_READ(from, eviction_slow);
     to->eviction_renumbered_buckets += WT_STAT_CONN_READ(from, eviction_renumbered_buckets);
+    to->eviction_server_readgen += WT_STAT_CONN_READ(from, eviction_server_readgen);
     to->eviction_skip_pages_locked_or_evicted +=
       WT_STAT_CONN_READ(from, eviction_skip_pages_locked_or_evicted);
     to->eviction_skip_pages_flag += WT_STAT_CONN_READ(from, eviction_skip_pages_flag);

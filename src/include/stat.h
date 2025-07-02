@@ -511,6 +511,7 @@ struct __wt_connection_stats {
     int64_t cache_eviction_blocked_no_progress;
     int64_t eviction_slow;
     int64_t eviction_renumbered_buckets;
+    int64_t eviction_server_readgen;
     int64_t eviction_skip_pages_locked_or_evicted;
     int64_t eviction_skip_pages_flag;
     int64_t eviction_skip_dirty_pages_during_checkpoint;
