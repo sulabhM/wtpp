@@ -8,15 +8,12 @@
 
 #pragma once
 
-#ifdef HAVE_X86INTRIN_H
-#if !defined(_MSC_VER) && !defined(_lint)
+#if defined(HAVE_X86INTRIN_H)
 #include <x86intrin.h>
-#endif
-#endif
-
-#if defined(HAVE_ARM_NEON_INTRIN_H)
+#elif defined(HAVE_ARM_NEON_INTRIN_H)
 #include <arm_neon.h>
 #endif
+
 /* 16B alignment */
 #define WT_ALIGNED_16(p) (((uintptr_t)(p)&0x0f) == 0)
 #define WT_VECTOR_SIZE 16 /* chunk size */

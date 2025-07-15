@@ -1,19 +1,3 @@
-project(python_swig C)
-
-# UseSWIG: Policy option to use the standard target name over a generated name.
-if(POLICY CMP0078)
-    cmake_policy(SET CMP0078 NEW)
-endif()
-
-# UseSWIG: Policy option to honor SWIG_MODULE_NAME.
-if(POLICY CMP0086)
-    cmake_policy(SET CMP0086 NEW)
-endif()
-
-find_package(SWIG 3.0 COMPONENTS python REQUIRED)
-include(${SWIG_USE_FILE})
-include(${CMAKE_SOURCE_DIR}/cmake/helpers.cmake)
-
 # Determine which wiredtiger target we should use to link against the
 # Python API. For linking purposes, we need to ensure the wiredtiger
 # library was compiled as position independent code (fPIC). This being achieved
@@ -30,12 +14,6 @@ else()
     message(FATAL_ERROR "Unable to build the Python API. Requires either a shared \
         library (ENABLE_SHARED) or a PIC-enabled (WITH_PIC) build of wiredtiger.")
 endif()
-
-set(python_libs)
-set(python_version)
-set(python_executable)
-# Source the uers Python3 install, extracting the Python3 sub-version, library and interpreter install paths.
-source_python3_package(python_libs python_version python_executable)
 
 # Manually specify the interface name '_wiredtiger' over a generated name.
 # Our wiredtiger python module expects the swig interface name '_wiredtiger'
@@ -55,7 +33,7 @@ list(APPEND swig_flags "-I${CMAKE_BINARY_DIR}/config")
 set(CMAKE_SWIG_FLAGS ${swig_flags})
 
 # Add dependencies to the swig module.
-set(SWIG_MODULE_wiredtiger_python_EXTRA_DEPS ${CMAKE_SOURCE_DIR}/src/include/wiredtiger.in)
+set(SWIG_MODULE_wiredtiger_python_EXTRA_DEPS ${CMAKE_SOURCE_DIR}/src/include/wiredtiger.h.in)
 
 swig_add_library(wiredtiger_python
   TYPE SHARED
@@ -124,7 +102,7 @@ list(APPEND swig_c_flags -I${CMAKE_BINARY_DIR}/config)
 
 # SWIG will generate deprecated python3 protocols (being marked as deprecated in Python 3.7+). Generally supress these warnings
 # as the SWIG compiler lags behind newer python3 versions.
-if(${python_version} VERSION_GREATER_EQUAL 3.7)
+if(${Python3_VERSION} VERSION_GREATER_EQUAL 3.7)
     if(NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "MSVC")
         list(APPEND swig_c_flags -Wno-deprecated-declarations)
     else()
@@ -136,7 +114,7 @@ target_compile_options(${swig_wt_target}
     PRIVATE ${swig_c_flags}
 )
 
-swig_link_libraries(wiredtiger_python ${wiredtiger_target} ${python_libs})
+target_link_libraries(wiredtiger_python ${wiredtiger_target} Python3::Python)
 
 # Setup our output 'wiredtiger' directory to hold the python module sources.
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/wiredtiger
@@ -178,7 +156,7 @@ endif()
 if(WT_POSIX)
     add_test(NAME test_ex_access
         COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}
-            ${python_executable} -S ${CMAKE_SOURCE_DIR}/examples/python/ex_access.py
+            ${Python3_EXECUTABLE} -S ${CMAKE_SOURCE_DIR}/examples/python/ex_access.py
     )
     set_tests_properties(test_ex_access PROPERTIES LABELS "check")
 endif()

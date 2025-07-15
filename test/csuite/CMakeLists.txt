@@ -1,7 +1,3 @@
-project(csuite)
-
-include(${CMAKE_SOURCE_DIR}/cmake/helpers.cmake)
-
 set(c_tests)
 
 define_c_test(
