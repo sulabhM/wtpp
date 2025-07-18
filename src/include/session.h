@@ -59,6 +59,20 @@ struct __wt_prefetch {
     uint64_t prefetch_skipped_with_parent;
 };
 
+/*
+ * WT_ERROR_INFO --
+ *  An error structure containing verbose information about an error from a session API call.
+ */
+struct __wt_error_info {
+    int err;
+    int sub_level_err;
+    const char *err_msg;
+    WT_ITEM err_msg_buf;
+};
+
+#define WT_ERROR_INFO_EMPTY ""
+#define WT_ERROR_INFO_SUCCESS "last API call was successful"
+
 /* Get the connection implementation for a session */
 #define S2C(session) ((WT_CONNECTION_IMPL *)((WT_SESSION_IMPL *)(session))->iface.connection)
 
@@ -143,7 +157,8 @@ struct __wt_session_impl {
 
     WT_IMPORT_LIST *import_list; /* List of metadata entries to import from file. */
 
-    u_int hs_cursor_counter; /* Number of open history store cursors */
+    u_int hs_cursor_counter;   /* Number of open history store cursors */
+    uint64_t hs_checkpoint_id; /* The checkpoint ID of the last opened HS cursor */
 
     WT_CURSOR *meta_cursor;  /* Metadata file */
     void *meta_track;        /* Metadata operation tracking */
@@ -192,6 +207,11 @@ struct __wt_session_impl {
         uint64_t total_reentry_hs_eviction_time;
     } reconcile_timeline;
 
+    /* Record statistics in an reconciliation. */
+    struct __wt_reconcile_stats {
+        uint64_t hs_wrapup_next_prev_calls;
+    } reconcile_stats;
+
     /*
      * Record the important timestamps of each stage in an eviction. If an eviction takes a long
      * time and times out, we can trace the time usage of each stage from this information.
@@ -205,6 +225,7 @@ struct __wt_session_impl {
     } evict_timeline;
 
     WT_ITEM err; /* Error buffer */
+    WT_ERROR_INFO err_info;
 
     WT_TXN_ISOLATION isolation;
     WT_TXN *txn; /* Transaction state */
@@ -214,19 +235,9 @@ struct __wt_session_impl {
     void *block_manager; /* Block-manager support */
     int (*block_manager_cleanup)(WT_SESSION_IMPL *);
 
-    const char *hs_checkpoint;     /* History store checkpoint name, during checkpoint cursor ops */
-    uint64_t checkpoint_write_gen; /* Write generation override, during checkpoint cursor ops */
+    const char *hs_checkpoint; /* History store checkpoint name, during checkpoint cursor ops */
 
-    /* Checkpoint handles */
-    WT_DATA_HANDLE **ckpt_handle; /* Handle list */
-    u_int ckpt_handle_next;       /* Next empty slot */
-    size_t ckpt_handle_allocated; /* Bytes allocated */
-
-    /* Named checkpoint drop list, during a checkpoint */
-    WT_ITEM *ckpt_drop_list;
-
-    /* Checkpoint time of current checkpoint, during a checkpoint */
-    uint64_t current_ckpt_sec;
+    WT_CKPT_SESSION ckpt; /* Checkpoint-related data */
 
     /*
      * Operations acting on handles.
@@ -271,14 +282,15 @@ struct __wt_session_impl {
 #define WT_SESSION_LOCKED_HANDLE_LIST_WRITE 0x0004u
 #define WT_SESSION_LOCKED_HOTBACKUP_READ 0x0008u
 #define WT_SESSION_LOCKED_HOTBACKUP_WRITE 0x0010u
-#define WT_SESSION_LOCKED_METADATA 0x0020u
-#define WT_SESSION_LOCKED_PASS 0x0040u
-#define WT_SESSION_LOCKED_SCHEMA 0x0080u
-#define WT_SESSION_LOCKED_SLOT 0x0100u
-#define WT_SESSION_LOCKED_TABLE_READ 0x0200u
-#define WT_SESSION_LOCKED_TABLE_WRITE 0x0400u
-#define WT_SESSION_LOCKED_TURTLE 0x0800u
-#define WT_SESSION_NO_SCHEMA_LOCK 0x1000u
+#define WT_SESSION_LOCKED_LIVE_RESTORE_STATE 0x0020u
+#define WT_SESSION_LOCKED_METADATA 0x0040u
+#define WT_SESSION_LOCKED_PASS 0x0080u
+#define WT_SESSION_LOCKED_SCHEMA 0x0100u
+#define WT_SESSION_LOCKED_SLOT 0x0200u
+#define WT_SESSION_LOCKED_TABLE_READ 0x0400u
+#define WT_SESSION_LOCKED_TABLE_WRITE 0x0800u
+#define WT_SESSION_LOCKED_TURTLE 0x1000u
+#define WT_SESSION_NO_SCHEMA_LOCK 0x2000u
     /*AUTOMATIC FLAG VALUE GENERATION STOP 32 */
     uint32_t lock_flags;
 
@@ -288,28 +300,32 @@ struct __wt_session_impl {
  */
 
 /* AUTOMATIC FLAG VALUE GENERATION START 0 */
-#define WT_SESSION_BACKUP_CURSOR 0x000001u
-#define WT_SESSION_BACKUP_DUP 0x000002u
-#define WT_SESSION_CACHE_CURSORS 0x000004u
-#define WT_SESSION_CAN_WAIT 0x000008u
-#define WT_SESSION_DEBUG_CHECKPOINT_FAIL_BEFORE_TURTLE_UPDATE 0x000010u
-#define WT_SESSION_DEBUG_DO_NOT_CLEAR_TXN_ID 0x000020u
-#define WT_SESSION_DEBUG_RELEASE_EVICT 0x000040u
-#define WT_SESSION_EVICTION 0x000080u
-#define WT_SESSION_IGNORE_CACHE_SIZE 0x000100u
-#define WT_SESSION_IMPORT 0x000200u
-#define WT_SESSION_IMPORT_REPAIR 0x000400u
-#define WT_SESSION_INTERNAL 0x000800u
-#define WT_SESSION_LOGGING_INMEM 0x001000u
-#define WT_SESSION_NO_DATA_HANDLES 0x002000u
-#define WT_SESSION_NO_RECONCILE 0x004000u
-#define WT_SESSION_PREFETCH_ENABLED 0x008000u
-#define WT_SESSION_PREFETCH_THREAD 0x010000u
-#define WT_SESSION_QUIET_CORRUPT_FILE 0x020000u
-#define WT_SESSION_READ_WONT_NEED 0x040000u
-#define WT_SESSION_RESOLVING_TXN 0x080000u
-#define WT_SESSION_ROLLBACK_TO_STABLE 0x100000u
-#define WT_SESSION_SCHEMA_TXN 0x200000u
+#define WT_SESSION_BACKUP_CURSOR 0x0000001u
+#define WT_SESSION_BACKUP_DUP 0x0000002u
+#define WT_SESSION_CACHE_CURSORS 0x0000004u
+#define WT_SESSION_CAN_WAIT 0x0000008u
+#define WT_SESSION_DEBUG_CHECKPOINT_FAIL_BEFORE_TURTLE_UPDATE 0x0000010u
+#define WT_SESSION_DEBUG_DO_NOT_CLEAR_TXN_ID 0x0000020u
+#define WT_SESSION_DEBUG_RELEASE_EVICT 0x0000040u
+#define WT_SESSION_DUMPING_EXTLIST 0x0000080u
+#define WT_SESSION_EVICTION 0x0000100u
+#define WT_SESSION_HS_WRAPUP 0x0000200u
+#define WT_SESSION_IGNORE_CACHE_SIZE 0x0000400u
+#define WT_SESSION_IMPORT 0x0000800u
+#define WT_SESSION_IMPORT_REPAIR 0x0001000u
+#define WT_SESSION_INTERNAL 0x0002000u
+#define WT_SESSION_LOGGING_INMEM 0x0004000u
+#define WT_SESSION_NO_DATA_HANDLES 0x0008000u
+#define WT_SESSION_NO_RECONCILE 0x0010000u
+#define WT_SESSION_PREFETCH_ENABLED 0x0020000u
+#define WT_SESSION_PREFETCH_THREAD 0x0040000u
+#define WT_SESSION_QUIET_CORRUPT_FILE 0x0080000u
+#define WT_SESSION_QUIET_OPEN_FILE 0x0100000u
+#define WT_SESSION_READ_WONT_NEED 0x0200000u
+#define WT_SESSION_RESOLVING_TXN 0x0400000u
+#define WT_SESSION_ROLLBACK_TO_STABLE 0x0800000u
+#define WT_SESSION_SAVE_ERRORS 0x1000000u
+#define WT_SESSION_SCHEMA_TXN 0x2000000u
     /* AUTOMATIC FLAG VALUE GENERATION STOP 32 */
     uint32_t flags;
 
@@ -317,13 +333,19 @@ struct __wt_session_impl {
  * All of the following fields live at the end of the structure so it's easier to clear everything
  * but the fields that persist.
  */
-#define WT_SESSION_CLEAR_SIZE (offsetof(WT_SESSION_IMPL, rnd))
+#define WT_SESSION_CLEAR_SIZE (offsetof(WT_SESSION_IMPL, rnd_random))
 
     /*
      * The random number state persists past session close because we don't want to repeatedly use
-     * the same values for skiplist depth when the application isn't caching sessions.
+     * the same values. This RNG is used for general purpose random number generation.
      */
-    wt_shared WT_RAND_STATE rnd; /* Random number generation state */
+    wt_shared WT_RAND_STATE rnd_random;
+    /*
+     * The random number state persists past session close because we don't want to repeatedly use
+     * the same values for skiplist depth when the application isn't caching sessions. This RNG
+     * supposedly uses a specially crafted seed suitable for skiplists.
+     */
+    wt_shared WT_RAND_STATE rnd_skiplist;
 
     /*
      * Hash tables are allocated lazily as sessions are used to keep the size of this structure from

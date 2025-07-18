@@ -182,13 +182,6 @@ __wti_schema_destroy_index(WT_SESSION_IMPL *session, WT_INDEX **idxp)
         idx->collator_owned = 0;
     }
 
-    /* If there is a custom extractor configured, terminate it. */
-    if (idx->extractor != NULL && idx->extractor_owned && idx->extractor->terminate != NULL) {
-        WT_TRET(idx->extractor->terminate(idx->extractor, &session->iface));
-        idx->extractor = NULL;
-        idx->extractor_owned = 0;
-    }
-
     __wt_free(session, idx->name);
     __wt_free(session, idx->source);
     __wt_free(session, idx->config);
@@ -196,7 +189,6 @@ __wti_schema_destroy_index(WT_SESSION_IMPL *session, WT_INDEX **idxp)
     __wt_free(session, idx->key_plan);
     __wt_free(session, idx->value_plan);
     __wt_free(session, idx->idxkey_format);
-    __wt_free(session, idx->exkey_format);
     __wt_free(session, idx);
 
     return (ret);
@@ -233,4 +225,21 @@ __wt_schema_close_table(WT_SESSION_IMPL *session, WT_TABLE *table)
     table->cg_complete = table->idx_complete = false;
 
     return (ret);
+}
+
+/*
+ * __wt_schema_close_layered --
+ *     Close a layered handle.
+ */
+void
+__wt_schema_close_layered(WT_SESSION_IMPL *session, WT_LAYERED_TABLE *layered)
+{
+    /* Free copies of copied configuration items. */
+    __wt_free(session, layered->key_format);
+    __wt_free(session, layered->value_format);
+    __wt_free(session, layered->ingest_uri);
+    __wt_free(session, layered->stable_uri);
+
+    /* Remove the ingest handle from layered table manager list */
+    __wt_layered_table_manager_remove_table(session, layered->ingest_btree_id);
 }

@@ -41,10 +41,10 @@ __curbackup_incr_blkmod(WT_SESSION_IMPL *session, WT_BTREE *btree, WT_CURSOR_BAC
     WT_ASSERT(session, cb->incr_src != NULL);
 
     /* Check if this is a file with no checkpointed content. */
-    ret = __wt_meta_checkpoint(session, btree->dhandle->name, 0, &ckpt);
+    ret = __wt_meta_checkpoint(session, btree->dhandle->name, 0, &ckpt, NULL);
     if (ret == 0 && ckpt.addr.size == 0)
         F_SET(cb, WT_CURBACKUP_CKPT_FAKE);
-    __wt_meta_checkpoint_free(session, &ckpt);
+    __wt_checkpoint_free(session, &ckpt);
 
     WT_ASSERT(session, cb->cfg_current != NULL);
     WT_ERR(__wt_config_getones(session, cb->cfg_current, "block_compressor", &v));
@@ -131,7 +131,10 @@ __curbackup_incr_next(WT_CURSOR *cursor)
     cb = (WT_CURSOR_BACKUP *)cursor;
     btree = cb->incr_cursor == NULL ? NULL : CUR2BT(cb->incr_cursor);
     raw = F_MASK(cursor, WT_CURSTD_RAW);
-    CURSOR_API_CALL(cursor, session, ret, next, btree);
+
+    /* FIXME-WT-14789: we can probably replace the NULL check with something tidier. */
+    CURSOR_API_CALL(cursor, session, ret, next,
+      btree == NULL ? NULL : ((WT_CURSOR_BTREE *)cb->incr_cursor)->dhandle);
     F_CLR(cursor, WT_CURSTD_RAW);
 
     if (!F_ISSET(cb, WT_CURBACKUP_INCR_INIT) &&

@@ -90,9 +90,15 @@ class TestSuiteConnection(object):
 # Just like a list of strings, but with a convenience function
 class ExtensionList(list):
     skipIfMissing = False
-    def extension(self, dirname, name, extarg=None):
+    def extension(self, dirname, name, extarg=None, configs=[]):
         if name and name != 'none':
             ext = '' if extarg == None else '=' + extarg
+            if configs != []:
+                if ext != '':
+                    raise Exception(
+                        'Cannot set both extarg and configs when configuring an extension list')
+                configlist = ','.join(configs)
+                ext = f'=(config=\"({configlist})\")'
             self.append(dirname + '/' + name + ext)
 
 class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
@@ -121,7 +127,7 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
     # conn_extensions can be overridden to add a list of extensions to load.
     # Each entry is a string (directory and extension name) and optional config.
     # Example:
-    #    conn_extensions = ('extractors/csv_extractor',
+    #    conn_extensions = ('collators/reverse',
     #                       'test/fail_fs={allow_writes=100}')
     conn_extensions = ()
 
@@ -191,6 +197,10 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
     # This may have a different implementation when running under certain hooks.
     def initialFileName(self, name):
         return self.platform_api.initialFileName(name)
+
+    # Return the disaggregated parameters for this testcase.
+    def getDisaggParameters(self):
+        return self.platform_api.getDisaggParameters()
 
     # Return the WiredTigerTimestamp for this testcase, or None if there is none.
     def getTimestamp(self):
@@ -301,9 +311,8 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
                     self.skipTest('extension "' + ext + '" not built')
                     continue
                 else:
-                    raise Exception(self.shortid() +
-                        ": " + ext +
-                        ": no extensions library found matching: " + pat)
+                    raise Exception(f"{self.shortid()}: {ext}" +
+                        f": no extensions library found matching '{libname}' in '{dirname}'")
             complete = '"' + filenames[0] + '"' + extconf
             if ext in extfiles:
                 if extfiles[ext] != complete:
@@ -405,6 +414,12 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
         else:
             session.commit_transaction(commit_config)
 
+    def early_setup(self):
+        """
+        Custom setup before the connection opens - to be overridden by the subclass.
+        """
+        pass
+
     def setUp(self):
         if not hasattr(self.__class__, 'wt_ntests'):
             self.__class__.wt_ntests = 0
@@ -432,7 +447,7 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
         self._connections = []
         self._failed = None   # set to True/False during teardown.
 
-        self.platform_api.setUp()
+        self.platform_api.setUp(self)
         self.origcwd = os.getcwd()
         shutil.rmtree(self.testdir, ignore_errors=True)
         if os.path.exists(self.testdir):
@@ -446,6 +461,10 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
         self.fdSetUp()
         self._threadLocal.currentTestCase = self
         self.ignoreTearDownLogs = False
+
+        # Custom setup before connection opens
+        self.early_setup()
+
         # tearDown needs a conn field, set it here in case the open fails.
         self.conn = None
         try:
@@ -475,6 +494,8 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
 
     def ignoreStdoutPattern(self, pattern, re_flags = 0):
         self.ignore_regex = re.compile(pattern, re_flags)
+        if hasattr(self, 'captureout'):
+            self.captureout.setIgnorePattern(self.ignore_regex)
 
     def readyDirectoryForRemoval(self, directory):
         # Make sure any read-only files or directories left behind
@@ -513,7 +534,7 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
         passed = not (self.failed() or teardown_failed)
 
         try:
-            self.platform_api.tearDown()
+            self.platform_api.tearDown(self)
         except:
             self.pr('ERROR: failed to tear down the platform API')
             self.prexception(sys.exc_info())
@@ -717,8 +738,8 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
 
     # Some tests do table drops as a means to perform some test repeatedly in a loop.
     # These tests require that a name be completely removed before the next iteration
-    # can begin.  However, tiered storage does not always provide a way to remove or
-    # rename objects that have been stored to the cloud, as doing that is not the normal
+    # can begin.  However, tiered storage does not always provide a way to remove objects
+    # that have been stored to the cloud, as doing that is not the normal
     # part of a workflow (at this writing, GC is not yet implemented). Most storage sources
     # return ENOTSUP when asked to remove a cloud object, so we really don't have a way to
     # clear out the name space, and so we skip these tests under tiered storage.
@@ -756,16 +777,6 @@ class WiredTigerTestCase(abstract_test_case.AbstractWiredTigerTestCase):
         while True:
             try:
                 session.verify(uri, config)
-                return
-            except wiredtiger.WiredTigerError as err:
-                if str(err) != os.strerror(errno.EBUSY):
-                    raise err
-                session.checkpoint()
-
-    def renameUntilSuccess(self, session, uri, newUri, config=None):
-        while True:
-            try:
-                session.rename(uri, newUri, config)
                 return
             except wiredtiger.WiredTigerError as err:
                 if str(err) != os.strerror(errno.EBUSY):

@@ -269,6 +269,74 @@ configure_debug_mode(char **p, size_t max)
 }
 
 /*
+ * configure_eviction --
+ *     Configure eviction settings.
+ */
+static void
+configure_eviction(char **p, size_t max)
+{
+    CONFIG_APPEND(*p, ",eviction=(");
+
+    if (GV(CACHE_EVICT_MAX) != 0)
+        CONFIG_APPEND(*p, ",threads_max=%" PRIu32 "", GV(CACHE_EVICT_MAX));
+
+    if (GV(EVICTION_EVICT_USE_SOFTPTR))
+        CONFIG_APPEND(*p, ",evict_use_softptr=true");
+
+    CONFIG_APPEND(*p, ")");
+}
+
+/*
+ * configure_live_restore --
+ *     Configure live_restore settings.
+ */
+static void
+configure_live_restore(char **p, size_t max)
+{
+    if (GV(BACKUP) && GV(BACKUP_LIVE_RESTORE) && g.backup_verify)
+        CONFIG_APPEND(*p,
+          ",live_restore=(enabled=true,path=\"%s/BACKUP\",read_size=%" PRIu32
+          "K,threads_max=%" PRIu32 ")",
+          g.home, GV(BACKUP_LIVE_RESTORE_READ_SIZE), GV(BACKUP_LIVE_RESTORE_THREADS));
+}
+
+/*
+ * configure_disagg_storage --
+ *     Configure disaggregated storage settings for opening a connection.
+ */
+static void
+configure_disagg_storage(const char *home, char **p, size_t max, char *ext_cfg, size_t ext_cfg_size)
+{
+    TEST_OPTS opts;
+    char disagg_cfg[1024];
+
+    if (!g.disagg_storage_config) {
+        testutil_assert(ext_cfg_size > 0);
+        ext_cfg[0] = '\0';
+        return;
+    }
+
+    memset(&opts, 0, sizeof(opts));
+    opts.disagg_storage = true;
+
+    /*
+     * We need to cast these values. Normally, testutil allocates and fills these strings based on
+     * command line arguments and frees them when done. Format doesn't use the standard test command
+     * line parser and doesn't rely on testutil to free anything in this struct. We're only using
+     * the options struct on a temporary basis to help create the disagg configuration.
+     */
+    opts.disagg_page_log = (char *)GVS(DISAGG_PAGE_LOG);
+    opts.disagg_mode = (char *)GVS(DISAGG_MODE);
+    opts.home = (char *)home;
+    opts.build_dir = (char *)BUILDDIR;
+    opts.palm_map_size_mb = 2048; /* 2 Gigabytes for PALM map */
+
+    testutil_disagg_storage_configuration(
+      &opts, home, disagg_cfg, sizeof(disagg_cfg), ext_cfg, ext_cfg_size);
+    CONFIG_APPEND(*p, ",%s", disagg_cfg);
+}
+
+/*
  * configure_tiered_storage --
  *     Configure tiered storage settings for opening a connection.
  */
@@ -351,6 +419,25 @@ configure_prefetch(char **p, size_t max)
 }
 
 /*
+ * configure_obsolete_cleanup --
+ *     Configure obsolete cleanup settings.
+ */
+static void
+configure_obsolete_cleanup(char **p, size_t max)
+{
+    CONFIG_APPEND(*p, ",checkpoint_cleanup=[");
+
+    /* Strategy. */
+    if (strcmp(GVS(OBSOLETE_CLEANUP_METHOD), "off") != 0)
+        CONFIG_APPEND(*p, "method=%s", (char *)GVS(OBSOLETE_CLEANUP_METHOD));
+
+    /* Interval. */
+    CONFIG_APPEND(*p, ",wait=%" PRIu32, GV(OBSOLETE_CLEANUP_WAIT));
+
+    CONFIG_APPEND(*p, "]");
+}
+
+/*
  * create_database --
  *     Create a WiredTiger database.
  */
@@ -359,7 +446,7 @@ create_database(const char *home, WT_CONNECTION **connp)
 {
     WT_CONNECTION *conn;
     size_t max;
-    char config[8 * 1024], *p, tiered_ext_cfg[1024];
+    char config[8 * 1024], disagg_ext_cfg[1024], *p, tiered_ext_cfg[1024];
     const char *s, *sources;
 
     p = config;
@@ -379,6 +466,12 @@ create_database(const char *home, WT_CONNECTION **connp)
         CONFIG_APPEND(p, ",eviction_dirty_target=%" PRIu32, GV(CACHE_EVICTION_DIRTY_TARGET));
     if (GV(CACHE_EVICTION_DIRTY_TRIGGER) != 0)
         CONFIG_APPEND(p, ",eviction_dirty_trigger=%" PRIu32, GV(CACHE_EVICTION_DIRTY_TRIGGER));
+
+    /* Eviction (updates) configuration. */
+    if (GV(CACHE_EVICTION_UPDATES_TARGET) != 0)
+        CONFIG_APPEND(p, ",eviction_updates_target=%" PRIu32, GV(CACHE_EVICTION_UPDATES_TARGET));
+    if (GV(CACHE_EVICTION_UPDATES_TRIGGER) != 0)
+        CONFIG_APPEND(p, ",eviction_updates_trigger=%" PRIu32, GV(CACHE_EVICTION_UPDATES_TRIGGER));
 
     /* Statistics log configuration. */
     sources = GVS(STATISTICS_LOG_SOURCES);
@@ -401,13 +494,8 @@ create_database(const char *home, WT_CONNECTION **connp)
           GV(BLOCK_CACHE_CACHE_ON_CHECKPOINT) == 0 ? "false" : "true",
           GV(BLOCK_CACHE_CACHE_ON_WRITES) == 0 ? "false" : "true", GV(BLOCK_CACHE_SIZE));
 
-    /* LSM configuration. */
-    if (g.lsm_config)
-        CONFIG_APPEND(p, ",lsm_manager=(worker_thread_max=%" PRIu32 "),", GV(LSM_WORKER_THREADS));
-
     /* Eviction configuration. */
-    if (GV(CACHE_EVICT_MAX) != 0)
-        CONFIG_APPEND(p, ",eviction=(threads_max=%" PRIu32 ")", GV(CACHE_EVICT_MAX));
+    configure_eviction(&p, max);
 
     /* Logging configuration. */
     if (GV(LOGGING)) {
@@ -422,22 +510,10 @@ create_database(const char *home, WT_CONNECTION **connp)
     /* Encryption. */
     CONFIG_APPEND(p, ",encryption=(name=%s)", encryptor());
 
-    /* Miscellaneous. */
-    if (GV(BUFFER_ALIGNMENT)) {
-#ifdef HAVE_POSIX_MEMALIGN
-        CONFIG_APPEND(p, ",buffer_alignment=512");
-#else
-        WARN("%s", "Ignoring buffer_alignment=1, missing HAVE_POSIX_MEMALIGN support")
-#endif
-    }
-
     if (GV(DISK_MMAP))
         CONFIG_APPEND(p, ",mmap=1");
     if (GV(DISK_MMAP_ALL))
         CONFIG_APPEND(p, ",mmap_all=1");
-
-    if (GV(DISK_DIRECT_IO))
-        CONFIG_APPEND(p, ",direct_io=(checkpoint,data,log)");
 
     if (GV(DISK_DATA_EXTEND))
         CONFIG_APPEND(p, ",file_extend=(data=8MB)");
@@ -451,6 +527,9 @@ create_database(const char *home, WT_CONNECTION **connp)
     /* Optional debug mode. */
     configure_debug_mode(&p, max);
 
+    /* Optional disaggregated storage. */
+    configure_disagg_storage(home, &p, max, disagg_ext_cfg, sizeof(disagg_ext_cfg));
+
     /* Optional tiered storage. */
     configure_tiered_storage(home, &p, max, tiered_ext_cfg, sizeof(tiered_ext_cfg));
 
@@ -460,12 +539,15 @@ create_database(const char *home, WT_CONNECTION **connp)
     /* Optional prefetch. */
     configure_prefetch(&p, max);
 
+    /* Obsolete cleanup. */
+    configure_obsolete_cleanup(&p, max);
+
 #define EXTENSION_PATH(path) (access((path), R_OK) == 0 ? (path) : "")
 
     /* Extensions. */
     CONFIG_APPEND(p,
       ",extensions=["
-      "\"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", %s],",
+      "\"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", %s, %s],",
       /* Collators. */
       REVERSE_PATH,
       /* Compressors. */
@@ -473,6 +555,8 @@ create_database(const char *home, WT_CONNECTION **connp)
       EXTENSION_PATH(ZSTD_PATH),
       /* Encryptors. */
       EXTENSION_PATH(ROTN_PATH), EXTENSION_PATH(SODIUM_PATH),
+      /* Page log. */
+      disagg_ext_cfg,
       /* Storage source. */
       tiered_ext_cfg);
 
@@ -572,24 +656,16 @@ create_object(TABLE *table, void *arg)
         CONFIG_APPEND(
           p, ",assert=(read_timestamp=%s)", g.transaction_timestamps_config ? "none" : "never");
 
-    /* Configure LSM. */
-    if (DATASOURCE(table, "lsm")) {
-        CONFIG_APPEND(p, ",type=lsm,lsm=(");
-        CONFIG_APPEND(p, "auto_throttle=%s,", TV(LSM_AUTO_THROTTLE) ? "true" : "false");
-        CONFIG_APPEND(p, "chunk_size=%" PRIu32 "MB,", TV(LSM_CHUNK_SIZE));
-        /*
-         * We can't set bloom_oldest without bloom, and we want to test with Bloom filters on most
-         * of the time anyway.
-         */
-        if (TV(LSM_BLOOM_OLDEST))
-            TV(LSM_BLOOM) = 1;
-        CONFIG_APPEND(p, "bloom=%s,", TV(LSM_BLOOM) ? "true" : "false");
-        CONFIG_APPEND(p, "bloom_bit_count=%" PRIu32 ",", TV(LSM_BLOOM_BIT_COUNT));
-        CONFIG_APPEND(p, "bloom_hash_count=%" PRIu32 ",", TV(LSM_BLOOM_HASH_COUNT));
-        CONFIG_APPEND(p, "bloom_oldest=%s,", TV(LSM_BLOOM_OLDEST) ? "true" : "false");
-        CONFIG_APPEND(p, "merge_max=%" PRIu32 ",", TV(LSM_MERGE_MAX));
-        CONFIG_APPEND(p, ",)");
-    }
+    /*
+     * Configure layered. Although disagg support is separated from layered support, we expect them
+     * to be used together, at least for now.
+     */
+    if (DATASOURCE(table, "layered") != TV(DISAGG_ENABLED))
+        testutil_die(EINVAL, "disagg setting expected to match layered setting");
+    if (DATASOURCE(table, "layered"))
+        CONFIG_APPEND(p, ",type=layered");
+    if (TV(DISAGG_ENABLED))
+        CONFIG_APPEND(p, ",block_manager=disagg");
 
     if (max == 0)
         testutil_die(ENOMEM, "WT_SESSION.create configuration buffer too small");
@@ -601,6 +677,22 @@ create_object(TABLE *table, void *arg)
     wt_wrap_open_session(conn, &sap, NULL, NULL, &session);
     testutil_checkfmt(session->create(session, table->uri, config), "%s", table->uri);
     wt_wrap_close_session(session);
+}
+
+/*
+ * disagg_conn_init --
+ *     For disaggregated storage, do some extra initialization of a connection.
+ */
+static void
+disagg_conn_init(WT_CONNECTION *conn)
+{
+    /*
+     * We do a separate wiredtiger_open call to create a the database and tables, and when we close
+     * that connection, a checkpoint is done. Disaggregated storage uses precise checkpoints, which
+     * require the stable timestamp to be set. Set it to the minimum value, which should not
+     * interfere with any later operations.
+     */
+    testutil_check(conn->set_timestamp(conn, "stable_timestamp=1"));
 }
 
 /*
@@ -623,6 +715,8 @@ wts_create_database(void)
     WT_CONNECTION *conn;
 
     create_database(g.home, &conn);
+    if (GVS(DISAGG_PAGE_LOG) != NULL)
+        disagg_conn_init(conn);
 
     g.wts_conn = conn;
     tables_apply(create_object, g.wts_conn);
@@ -668,8 +762,14 @@ wts_open(const char *home, WT_CONNECTION **connp, bool verify_metadata)
     /* Optional debug mode. */
     configure_debug_mode(&p, max);
 
+    /* Optional live restore. */
+    configure_live_restore(&p, max);
+
     /* Optional prefetch. */
     configure_prefetch(&p, max);
+
+    /* Obsolete cleanup. */
+    configure_obsolete_cleanup(&p, max);
 
     /* If in-memory, there's only a single, shared WT_CONNECTION handle. */
     if (GV(RUNS_IN_MEMORY) != 0)
@@ -684,6 +784,12 @@ wts_open(const char *home, WT_CONNECTION **connp, bool verify_metadata)
             CONFIG_APPEND(p, ",%s", s);
         if (g.config_open != NULL)
             CONFIG_APPEND(p, ",%s", g.config_open);
+        /*
+         * FIXME-WT-14979: Precise checkpoints are incompatible with the on-disk block manager.
+         * Ideally we would not gate precise checkpoints on disagg also being enabled.
+         */
+        if (g.disagg_storage_config && GV(CHECKPOINT_PRECISE))
+            CONFIG_APPEND(p, ",checkpoint=(precise=true)");
 
 #if WIREDTIGER_VERSION_MAJOR >= 10
         if (GV(OPS_VERIFY) && verify_metadata)

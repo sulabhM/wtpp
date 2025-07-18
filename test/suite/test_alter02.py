@@ -47,7 +47,6 @@ class test_alter02(TieredConfigMixin, wttest.WiredTigerTestCase):
 
     types = [
         ('file', dict(uri='file:', use_cg=False, use_index=False)),
-        ('lsm', dict(uri='lsm:', use_cg=False, use_index=False)),
         ('table-cg', dict(uri='table:', use_cg=True, use_index=False)),
         ('table-index', dict(uri='table:', use_cg=False, use_index=True)),
         ('table-simple', dict(uri='table:', use_cg=False, use_index=False)),
@@ -96,6 +95,13 @@ class test_alter02(TieredConfigMixin, wttest.WiredTigerTestCase):
         if metastr == '':
             return
         cursor = self.session.open_cursor('metadata:', None, None)
+
+        # If the metadata string is something like 'log=(enabled=true)', also check for
+        # 'log=(enabled=true,'. We need this if 'log' in the table's metadata has other fields.
+        metastr_alt = metastr
+        if metastr_alt.endswith(')'):
+            metastr_alt = metastr_alt[:-1] + ','
+
         #
         # Walk through all the metadata looking for the entries that are
         # the file URIs for components of the table.
@@ -106,12 +112,11 @@ class test_alter02(TieredConfigMixin, wttest.WiredTigerTestCase):
             if ret != 0:
                 break
             key = cursor.get_key()
-            check_meta = ((key.find("lsm:") != -1 or key.find("file:") != -1) \
-                and key.find(self.name) != -1)
+            check_meta = key.find("file:") != -1 and key.find(self.name) != -1
             if check_meta:
                 value = cursor[key]
                 found = True
-                self.assertTrue(value.find(metastr) != -1)
+                self.assertTrue(value.find(metastr) != -1 or value.find(metastr_alt) != -1)
         cursor.close()
         self.assertTrue(found == True)
 
@@ -138,8 +143,8 @@ class test_alter02(TieredConfigMixin, wttest.WiredTigerTestCase):
 
     # Alter: Change the log setting after creation
     def test_alter02_log(self):
-        if self.is_tiered_scenario() and (self.uri == 'lsm:' or self.uri == 'file:'):
-            self.skipTest('Tiered storage does not support LSM or file URIs.')
+        if self.is_tiered_scenario() and (self.uri == 'file:'):
+            self.skipTest('Tiered storage does not support file URIs.')
 
         uri = self.uri + self.name
         create_params = 'key_format=i,value_format=S,'

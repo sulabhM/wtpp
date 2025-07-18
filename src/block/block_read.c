@@ -13,14 +13,16 @@
  *     Map or read address cookie referenced block into a buffer.
  */
 int
-__wt_bm_read(
-  WT_BM *bm, WT_SESSION_IMPL *session, WT_ITEM *buf, const uint8_t *addr, size_t addr_size)
+__wt_bm_read(WT_BM *bm, WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *block_meta,
+  const uint8_t *addr, size_t addr_size)
 {
     WT_BLOCK *block;
     WT_DECL_RET;
     wt_off_t offset;
     uint32_t checksum, objectid, size;
     bool last_release;
+
+    WT_UNUSED(block_meta);
 
     block = bm->block;
 
@@ -59,11 +61,11 @@ err:
 }
 
 /*
- * __bm_corrupt_dump --
+ * __wt_bm_corrupt_dump --
  *     Dump a block into the log in 1KB chunks.
  */
-static int
-__bm_corrupt_dump(WT_SESSION_IMPL *session, WT_ITEM *buf, uint32_t objectid, wt_off_t offset,
+int
+__wt_bm_corrupt_dump(WT_SESSION_IMPL *session, WT_ITEM *buf, uint32_t objectid, wt_off_t offset,
   uint32_t size, uint32_t checksum) WT_GCC_FUNC_ATTRIBUTE((cold))
 {
     WT_DECL_ITEM(tmp);
@@ -112,12 +114,12 @@ __wt_bm_corrupt(WT_BM *bm, WT_SESSION_IMPL *session, const uint8_t *addr, size_t
 
     /* Read the block. */
     WT_RET(__wt_scr_alloc(session, 0, &tmp));
-    WT_ERR(__wt_bm_read(bm, session, tmp, addr, addr_size));
+    WT_ERR(__wt_bm_read(bm, session, tmp, NULL, addr, addr_size));
 
     /* Crack the cookie, dump the block. */
     WT_ERR(__wt_block_addr_unpack(
       session, bm->block, addr, addr_size, &objectid, &offset, &size, &checksum));
-    WT_ERR(__bm_corrupt_dump(session, tmp, objectid, offset, size, checksum));
+    WT_ERR(__wt_bm_corrupt_dump(session, tmp, objectid, offset, size, checksum));
 
 err:
     __wt_scr_free(session, &tmp);
@@ -167,32 +169,22 @@ __wti_block_read_off(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf, ui
 {
     WT_BLOCK_HEADER *blk, swap;
     size_t bufsize, check_size;
+    uint64_t time_start, time_stop;
     int failures, max_failures;
     bool chunkcache_hit, full_checksum_mismatch;
+
+    time_start = __wt_clock(session);
 
     chunkcache_hit = full_checksum_mismatch = false;
     check_size = 0;
     failures = 0;
+    bufsize = size;
     max_failures = F_ISSET(&S2C(session)->chunkcache, WT_CHUNKCACHE_CONFIGURED) ? 2 : 1;
     __wt_verbose_debug2(session, WT_VERB_READ,
       "off %" PRIuMAX ", size %" PRIu32 ", checksum %#" PRIx32, (uintmax_t)offset, size, checksum);
 
     WT_STAT_CONN_INCR(session, block_read);
     WT_STAT_CONN_INCRV(session, block_byte_read, size);
-
-    /*
-     * Grow the buffer as necessary and read the block. Buffers should be aligned for reading, but
-     * there are lots of buffers (for example, file cursors have two buffers each, key and value),
-     * and it's difficult to be sure we've found all of them. If the buffer isn't aligned, it's an
-     * easy fix: set the flag and guarantee we reallocate it. (Most of the time on reads, the buffer
-     * memory has not yet been allocated, so we're not adding any additional processing time.)
-     */
-    if (F_ISSET(buf, WT_ITEM_ALIGNED))
-        bufsize = size;
-    else {
-        F_SET(buf, WT_ITEM_ALIGNED);
-        bufsize = WT_MAX(size, buf->memsize + 10);
-    }
 
     /*
      * Ensure we don't read information that isn't there. It shouldn't ever happen, but it's a cheap
@@ -236,8 +228,17 @@ __wti_block_read_off(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf, ui
         __wt_block_header_byteswap_copy(blk, &swap);
         check_size = F_ISSET(&swap, WT_BLOCK_DATA_CKSUM) ? size : WT_BLOCK_COMPRESS_SKIP;
         if (swap.checksum == checksum) {
+            /*
+             * Set block header checksum to 0 to allow the checksum to be computed, as its
+             * calculation includes the block header. Not clearing it would result in the checksum
+             * being miscalculated. blk->checksum remains cleared, as it will not be revisited
+             * during a B-tree traversal.
+             */
             blk->checksum = 0;
             if (__wt_checksum_match(buf->mem, check_size, checksum)) {
+                time_stop = __wt_clock(session);
+                __wt_stat_msecs_hist_incr_bmread(session, WT_CLOCKDIFF_MS(time_stop, time_start));
+
                 /*
                  * Swap the page-header as needed; this doesn't belong here, but it's the best place
                  * to catch all callers.
@@ -281,12 +282,34 @@ __wti_block_read_off(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf, ui
               "B block at offset %" PRIuMAX ": block header checksum of %#" PRIx32
               " doesn't match expected checksum of %#" PRIx32,
               block->name, size, (uintmax_t)offset, swap.checksum, checksum);
-        WT_IGNORE_RET(__bm_corrupt_dump(session, buf, objectid, offset, size, checksum));
+        WT_IGNORE_RET(__wt_bm_corrupt_dump(session, buf, objectid, offset, size, checksum));
     }
 
     /* Panic if a checksum fails during an ordinary read. */
     F_SET(S2C(session), WT_CONN_DATA_CORRUPTION);
+
     if (block->verify || F_ISSET(session, WT_SESSION_QUIET_CORRUPT_FILE))
         return (WT_ERROR);
+
+    /*
+     * Dump the extent lists associated with all available checkpoints in the system. Viewing the
+     * state of the extent lists in the event of a read error can help pinpoint the reason for the
+     * read error. Since dumping the extent lists also requires reading the block, we must set the
+     * WT_SESSION_DUMPING_EXTLIST flag to ensure we don't recursively attempt to dump extent lists.
+     */
+    if (!F_ISSET(session, WT_SESSION_DUMPING_EXTLIST)) {
+        F_SET(session, WT_SESSION_DUMPING_EXTLIST);
+        /* Dump the live checkpoint extent lists. */
+        WT_IGNORE_RET(__wti_block_extlist_dump(session, &block->live.alloc));
+        WT_IGNORE_RET(__wti_block_extlist_dump(session, &block->live.avail));
+        WT_IGNORE_RET(__wti_block_extlist_dump(session, &block->live.discard));
+
+        /* Dump the rest of the extent lists associated with any other valid checkpoints in the
+         * file. */
+        WT_IGNORE_RET(__wti_block_checkpoint_extlist_dump(session, block));
+
+        F_CLR(session, WT_SESSION_DUMPING_EXTLIST);
+    }
+
     WT_RET_PANIC(session, WT_ERROR, "%s: fatal read error", block->name);
 }

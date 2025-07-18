@@ -38,10 +38,9 @@ class test_tiered07(wttest.WiredTigerTestCase, TieredConfigMixin):
 
     storage_sources = gen_tiered_storage_sources(wttest.getss_random_prefix(), 'test_tiered07', tiered_only=True)
 
-    # FIXME-WT-8897 Disabled S3 (only indexing dirstore in storage sources) as S3 directory listing
+    # Disabled S3 (only indexing dirstore in storage sources) as S3 directory listing
     # is interpreting a directory to end in a '/', whereas the code in the tiered storage doesn't
-    # expect that. Enable when fixed.
-    # Make scenarios for different cloud service providers
+    # expect that.
     flush_obj = [('ckpt', dict(first_ckpt=True)),
                  ('no_ckpt', dict(first_ckpt=False)),
                 ]
@@ -76,11 +75,6 @@ class test_tiered07(wttest.WiredTigerTestCase, TieredConfigMixin):
         self.session.create(self.uri3, 'key_format=S,value_format=S')
         self.pr('create table local')
         self.session.create(self.localuri, 'key_format=S,value_format=S,tiered_storage=(name=none)')
-
-        # Rename is not supported for tiered tables.
-        msg = "/is not supported/"
-        self.assertRaisesWithMessage(wiredtiger.WiredTigerError,
-            lambda:self.assertEqual(self.session.rename(self.uri, self.newuri, None), 0), msg)
 
         # Add some data and flush tier.
         self.pr('add one item to all tables')

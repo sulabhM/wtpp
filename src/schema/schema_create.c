@@ -9,50 +9,6 @@
 #include "wt_internal.h"
 
 /*
- * __wt_direct_io_size_check --
- *     Return a size from the configuration, complaining if it's insufficient for direct I/O.
- */
-int
-__wt_direct_io_size_check(
-  WT_SESSION_IMPL *session, const char **cfg, const char *config_name, uint32_t *allocsizep)
-{
-    WT_CONFIG_ITEM cval;
-    WT_CONNECTION_IMPL *conn;
-    uint32_t allocsize;
-
-    *allocsizep = 0;
-
-    conn = S2C(session);
-
-    WT_RET(__wt_config_gets(session, cfg, config_name, &cval));
-    allocsize = (uint32_t)cval.val;
-
-    /*
-     * This function exists as a place to hang this comment: if direct I/O is configured, page sizes
-     * must be at least as large as any buffer alignment as well as a multiple of the alignment.
-     * Linux gets unhappy if you configure direct I/O and then don't do I/O in alignments and units
-     * of its happy place. Ideally, we'd fail if an application set an allocation size incompatible
-     * with the direct I/O size, while silently adjusting internal files using a default allocation
-     * size, but this function is too far down in the call stack to distinguish between the two. We
-     * document that setting a larger buffer alignment than the allocation size silently increases
-     * the allocation size: direct I/O isn't a heavily used feature, that should be sufficient.
-     */
-    if (conn->buffer_alignment != 0 &&
-      FLD_ISSET(conn->direct_io, WT_DIRECT_IO_CHECKPOINT | WT_DIRECT_IO_DATA)) {
-
-        if (allocsize < conn->buffer_alignment)
-            allocsize = (uint32_t)conn->buffer_alignment;
-        if (allocsize % conn->buffer_alignment != 0)
-            WT_RET_MSG(session, EINVAL,
-              "when direct I/O is configured for data files, the %s size must be at least as large "
-              "as the buffer alignment, as well as a multiple of the buffer alignment",
-              config_name);
-    }
-    *allocsizep = allocsize;
-    return (0);
-}
-
-/*
  * __check_imported_ts --
  *     Check the aggregated timestamps for each checkpoint in a file that we've imported. By
  *     default, we're not allowed to import files with timestamps ahead of the oldest timestamp
@@ -94,7 +50,7 @@ __check_imported_ts(
 
 err:
     if (ckptbase != NULL)
-        __wt_meta_ckptlist_free(session, &ckptbase);
+        __wt_ckptlist_free(session, &ckptbase);
     return (ret);
 }
 
@@ -103,20 +59,47 @@ err:
  *     Create a new file in the block manager, and track it.
  */
 static int
-__create_file_block_manager(
-  WT_SESSION_IMPL *session, const char *uri, const char *filename, uint32_t allocsize)
+__create_file_block_manager(WT_SESSION_IMPL *session, const char *uri, const char *filename,
+  uint32_t allocsize, const char **cfg)
 {
-    WT_RET(__wt_block_manager_create(session, filename, allocsize));
+    WT_CONFIG_ITEM page_log_item;
+    WT_DECL_RET;
+    WT_NAMED_PAGE_LOG *npage_log;
 
-    /*
-     * Track the creation of this file.
-     *
-     * If something down the line fails, we're going to need to roll this back. Specifically do NOT
-     * track the op in the import case since we do not want to wipe a data file just because we fail
-     * to import it.
-     */
-    if (WT_META_TRACKING(session))
-        WT_RET(__wt_meta_track_fileop(session, NULL, uri));
+    npage_log = NULL;
+
+    if (WT_PREFIX_MATCH(uri, "file:") && WT_SUFFIX_MATCH(uri, ".wt_stable")) {
+        WT_RET_NOTFOUND_OK(
+          __wt_config_gets(session, cfg, "disaggregated.page_log", &page_log_item));
+        if (ret == WT_NOTFOUND || page_log_item.len == 0)
+            npage_log = S2C(session)->disaggregated_storage.npage_log;
+        else
+            WT_RET(__wt_schema_open_page_log(session, &page_log_item, &npage_log));
+    }
+
+    if (npage_log != NULL) {
+        /*
+         * This is currently a place holder - the page log isn't fully created until the btree is
+         * created and I don't want to pull that forward into this schema code at the moment. So
+         * make a stub call to demonstrate intention, but the subsequent open call will implicitly
+         * create a file if necessary. Using the disaggregated manager also means metadata tracking
+         * isn't currently working. It assumes that the existing default block manager is
+         * responsible for objects.
+         */
+        WT_RET(__wt_block_disagg_manager_create(session, NULL, filename));
+    } else {
+        WT_RET(__wt_block_manager_create(session, filename, allocsize));
+
+        /*
+         * Track the creation of this file.
+         *
+         * If something down the line fails, we're going to need to roll this back. Specifically do
+         * NOT track the op in the import case since we do not want to wipe a data file just because
+         * we fail to import it.
+         */
+        if (WT_META_TRACKING(session))
+            WT_RET(__wt_meta_track_fileop(session, NULL, uri));
+    }
 
     return (0);
 }
@@ -136,8 +119,8 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
       *filecfg[] = {WT_CONFIG_BASE(session, file_meta), config, NULL, NULL, NULL, NULL},
       *filestripped;
     char *fileconf, *filemeta;
-    uint32_t allocsize;
-    bool against_stable, exists, import, import_repair, is_metadata;
+    uint32_t allocsize, fileid;
+    bool against_stable, exists, import, import_repair, is_metadata, is_shared;
 
     fileconf = filemeta = NULL;
     filestripped = NULL;
@@ -149,6 +132,8 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
 
     filename = uri;
     WT_PREFIX_SKIP_REQUIRED(session, filename, "file:");
+
+    WT_ERR(__wt_btree_shared(session, uri, filecfg, &is_shared));
 
     /* Check if the file already exists. */
     if (!is_metadata && (ret = __wt_metadata_search(session, uri, &fileconf)) != WT_NOTFOUND) {
@@ -175,8 +160,8 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
             WT_IGNORE_RET(__wt_fs_remove(session, filename, true, false));
     }
 
-    /* Sanity check the allocation size. */
-    WT_ERR(__wt_direct_io_size_check(session, filecfg, "allocation_size", &allocsize));
+    WT_ERR(__wt_config_gets(session, filecfg, "allocation_size", &cval));
+    allocsize = (uint32_t)cval.val;
 
     /*
      * If we are importing an existing object rather than creating a new one, there are two possible
@@ -191,7 +176,7 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
          */
         if (WT_SUFFIX_MATCH(filename, ".wtobj")) {
             if (session->import_list != NULL)
-                WT_ERR(__create_file_block_manager(session, uri, filename, allocsize));
+                WT_ERR(__create_file_block_manager(session, uri, filename, allocsize, filecfg));
             else
                 WT_ERR_MSG(session, ENOTSUP,
                   "%s: import without metadata_file not supported on tiered files", uri);
@@ -254,7 +239,7 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
         }
     } else
         /* Create the file. */
-        WT_ERR(__create_file_block_manager(session, uri, filename, allocsize));
+        WT_ERR(__create_file_block_manager(session, uri, filename, allocsize, filecfg));
 
     /*
      * If creating an ordinary file, update the file ID and current version numbers and strip
@@ -263,11 +248,13 @@ __create_file(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const c
      */
     if (!is_metadata) {
         if (!import_repair) {
+            fileid = WT_BTREE_ID_NAMESPACED(++S2C(session)->next_file_id);
+            if (is_shared)
+                FLD_SET(fileid, WT_BTREE_ID_NAMESPACE_SHARED);
             WT_ERR(__wt_scr_alloc(session, 0, &val));
             WT_ERR(__wt_buf_fmt(session, val,
               "id=%" PRIu32 ",version=(major=%" PRIu16 ",minor=%" PRIu16 "),checkpoint_lsn=",
-              ++S2C(session)->next_file_id, WT_BTREE_VERSION_MAX.major,
-              WT_BTREE_VERSION_MAX.minor));
+              fileid, WT_BTREE_VERSION_MAX.major, WT_BTREE_VERSION_MAX.minor));
             for (p = filecfg; *p != NULL; ++p)
                 ;
             *p = val->data;
@@ -324,11 +311,11 @@ err:
 }
 
 /*
- * __wti_schema_colgroup_source --
+ * __schema_colgroup_source --
  *     Get the URI of the data source for a column group.
  */
-int
-__wti_schema_colgroup_source(
+static int
+__schema_colgroup_source(
   WT_SESSION_IMPL *session, WT_TABLE *table, const char *cgname, const char *config, WT_ITEM *buf)
 {
     WT_CONFIG_ITEM cval;
@@ -591,7 +578,7 @@ __create_colgroup(WT_SESSION_IMPL *session, const char *name, bool exclusive, co
             WT_ERR(__wt_buf_fmt(session, &confbuf, "source=\"%s\"", source));
             *cfgp++ = confbuf.data;
         } else {
-            WT_ERR(__wti_schema_colgroup_source(session, table, cgname, config, &namebuf));
+            WT_ERR(__schema_colgroup_source(session, table, cgname, config, &namebuf));
             source = namebuf.data;
             WT_ERR(__wt_buf_fmt(session, &confbuf, "source=\"%s\"", source));
             *cfgp++ = confbuf.data;
@@ -644,11 +631,11 @@ err:
 }
 
 /*
- * __wti_schema_index_source --
+ * __schema_index_source --
  *     Get the URI of the data source for an index.
  */
-int
-__wti_schema_index_source(
+static int
+__schema_index_source(
   WT_SESSION_IMPL *session, WT_TABLE *table, const char *idxname, const char *config, WT_ITEM *buf)
 {
     WT_CONFIG_ITEM cval;
@@ -721,12 +708,10 @@ static int
 __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const char *config)
 {
     WT_CONFIG kcols, pkcols;
-    WT_CONFIG_ITEM ckey, cval, icols, kval;
-    WT_DECL_PACK_VALUE(pv);
+    WT_CONFIG_ITEM ckey, cval, icols;
     WT_DECL_RET;
     WT_INDEX *idx;
     WT_ITEM confbuf, extra_cols, fmt, namebuf;
-    WT_PACK pack;
     WT_TABLE *table;
     size_t tlen;
     u_int i, npublic_cols;
@@ -734,7 +719,7 @@ __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const
     const char *cfg[4] = {WT_CONFIG_BASE(session, index_meta), NULL, NULL, NULL};
     const char *idxname, *source, *sourceconf, *tablename;
     const char *sourcecfg[] = {config, NULL, NULL};
-    bool exists, have_extractor;
+    bool exists;
 
     sourceconf = NULL;
     idxconf = origconf = NULL;
@@ -742,7 +727,7 @@ __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const
     WT_CLEAR(fmt);
     WT_CLEAR(extra_cols);
     WT_CLEAR(namebuf);
-    exists = have_extractor = false;
+    exists = false;
 
     tablename = name;
     WT_PREFIX_SKIP_REQUIRED(session, tablename, "index:");
@@ -787,45 +772,26 @@ __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const
         WT_ERR(__wt_buf_fmt(session, &namebuf, "%.*s", (int)cval.len, cval.str));
         source = namebuf.data;
     } else {
-        WT_ERR(__wti_schema_index_source(session, table, idxname, config, &namebuf));
+        WT_ERR(__schema_index_source(session, table, idxname, config, &namebuf));
         source = namebuf.data;
 
         /* Add the source name to the index config before collapsing. */
         WT_ERR(__wt_buf_catfmt(session, &confbuf, ",source=\"%s\"", source));
     }
 
-    if (__wt_config_getones_none(session, config, "extractor", &cval) == 0 && cval.len != 0) {
-        have_extractor = true;
-        /*
-         * Custom extractors must supply a key format; convert not-found errors to EINVAL for the
-         * application.
-         */
-        if ((ret = __wt_config_getones(session, config, "key_format", &kval)) != 0)
-            WT_ERR_MSG(session, ret == WT_NOTFOUND ? EINVAL : 0,
-              "%s: custom extractors require a key_format", name);
-    }
-
     /* Calculate the key/value formats. */
     WT_CLEAR(icols);
-    if (__wt_config_getones(session, config, "columns", &icols) != 0 && !have_extractor)
+    if (__wt_config_getones(session, config, "columns", &icols) != 0)
         WT_ERR_MSG(session, EINVAL, "%s: requires 'columns' configuration", name);
 
     /*
-     * Count the public columns using the declared columns for normal indices or the key format for
-     * custom extractors.
+     * Count the public columns using the declared columns.
      */
     npublic_cols = 0;
-    if (!have_extractor) {
-        __wt_config_subinit(session, &kcols, &icols);
-        while ((ret = __wt_config_next(&kcols, &ckey, &cval)) == 0)
-            ++npublic_cols;
-        WT_ERR_NOTFOUND_OK(ret, false);
-    } else {
-        WT_ERR(__pack_initn(session, &pack, kval.str, kval.len));
-        while ((ret = __pack_next(&pack, &pv)) == 0)
-            ++npublic_cols;
-        WT_ERR_NOTFOUND_OK(ret, false);
-    }
+    __wt_config_subinit(session, &kcols, &icols);
+    while ((ret = __wt_config_next(&kcols, &ckey, &cval)) == 0)
+        ++npublic_cols;
+    WT_ERR_NOTFOUND_OK(ret, false);
 
     /*
      * The key format for an index is somewhat subtle: the application specifies a set of columns
@@ -839,12 +805,8 @@ __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const
         /*
          * If the primary key column is already in the secondary key, don't add it again.
          */
-        if (__wt_config_subgetraw(session, &icols, &ckey, &cval) == 0) {
-            if (have_extractor)
-                WT_ERR_MSG(session, EINVAL,
-                  "an index with a custom extractor may not include primary key columns");
+        if (__wt_config_subgetraw(session, &icols, &ckey, &cval) == 0)
             continue;
-        }
         WT_ERR(__wt_buf_catfmt(session, &extra_cols, "%.*s,", (int)ckey.len, ckey.str));
     }
     WT_ERR_NOTFOUND_OK(ret, false);
@@ -852,13 +814,8 @@ __create_index(WT_SESSION_IMPL *session, const char *name, bool exclusive, const
     /* Index values are empty: all columns are packed into the index key. */
     WT_ERR(__wt_buf_fmt(session, &fmt, "value_format=,key_format="));
 
-    if (have_extractor) {
-        WT_ERR(__wt_buf_catfmt(session, &fmt, "%.*s", (int)kval.len, kval.str));
-        WT_CLEAR(icols);
-    }
-
     /*
-     * Construct the index key format, or append the primary key columns for custom extractors.
+     * Construct the index key format.
      */
     WT_ERR(__wt_struct_reformat(
       session, table, icols.str, icols.len, (const char *)extra_cols.data, false, &fmt));
@@ -1033,6 +990,120 @@ err:
 }
 
 /*
+ * __create_layered --
+ *     Create a layered tree - such a tree is a pair of underlying btrees, one that holds recently
+ *     ingested data, the other a full set of stable data.
+ */
+static int
+__create_layered(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const char *config)
+{
+    WT_CONNECTION_IMPL *conn;
+    WT_DECL_ITEM(disagg_config);
+    WT_DECL_ITEM(ingest_uri_buf);
+    WT_DECL_ITEM(stable_uri_buf);
+    WT_DECL_ITEM(tmp);
+    WT_DECL_RET;
+    char *meta_value;
+    char *tablecfg;
+    const char *constituent_cfg;
+    const char *ingest_cfg[4] = {WT_CONFIG_BASE(session, table_meta), config, NULL, NULL};
+    const char *ingest_uri, *stable_uri, *tablename;
+    const char *layered_cfg[5] = {
+      WT_CONFIG_BASE(session, layered_meta), "", config == NULL ? "" : config, NULL, NULL};
+    const char *stable_cfg[5] = {WT_CONFIG_BASE(session, table_meta), "", config, NULL, NULL};
+
+    conn = S2C(session);
+
+    constituent_cfg = NULL;
+    tablecfg = NULL;
+    meta_value = NULL;
+
+    WT_RET(__wt_scr_alloc(session, 0, &disagg_config));
+    WT_ERR(__wt_scr_alloc(session, 0, &ingest_uri_buf));
+    WT_ERR(__wt_scr_alloc(session, 0, &stable_uri_buf));
+    WT_ERR(__wt_scr_alloc(session, 0, &tmp));
+
+    /* Check if the layered table already exists. */
+    if ((ret = __wt_metadata_search(session, uri, &meta_value)) != WT_NOTFOUND) {
+        if (exclusive)
+            WT_TRET(EEXIST);
+        goto err;
+    }
+    WT_ERR_NOTFOUND_OK(ret, false);
+
+    tablename = uri;
+    WT_PREFIX_SKIP_REQUIRED(session, tablename, "layered:");
+    WT_ERR(__wt_buf_fmt(session, ingest_uri_buf, "file:%s.wt_ingest", tablename));
+    ingest_uri = ingest_uri_buf->data;
+    WT_ERR(__wt_buf_fmt(session, stable_uri_buf, "file:%s.wt_stable", tablename));
+    stable_uri = stable_uri_buf->data;
+
+    /*
+     * We're creating a layered table. Set the initial tiers list to empty. Opening the table will
+     * cause us to create our first file or tiered object.
+     */
+    WT_ASSERT_ALWAYS(session, !F_ISSET(conn, WT_CONN_READONLY),
+      "Can't create a layered table on a read only connection");
+
+    /* Remember the relevant configuration. */
+    WT_ERR(__wt_buf_fmt(session, disagg_config, "disaggregated=(page_log=%s)",
+      conn->disaggregated_storage.page_log ? conn->disaggregated_storage.page_log : ""));
+    layered_cfg[1] = disagg_config->data;
+
+    /*
+     * By default use the connection level bucket and prefix. Then we add in any user configuration
+     * that may override the system one.
+     *
+     * Disable logging for layered table so we have timestamps.
+     */
+    WT_ERR(__wt_buf_fmt(
+      session, tmp, "ingest=\"%s\",stable=\"%s\",log=(enabled=false)", ingest_uri, stable_uri));
+    layered_cfg[3] = tmp->data;
+
+    WT_ERR(__wt_config_collapse(session, layered_cfg, &tablecfg));
+    WT_ERR(__wt_metadata_insert(session, uri, tablecfg));
+
+    /* Disable logging on the ingest table so we have timestamps. */
+    ingest_cfg[2] = "in_memory=true,log=(enabled=false),disaggregated=(page_log=none)";
+
+    /*
+     * Since layered table constituents use table URIs, pass the full merged configuration string
+     * through
+     * - otherwise file-specific metadata will be stripped out.
+     */
+    WT_ERR(__wt_config_merge(session, ingest_cfg, NULL, &constituent_cfg));
+    WT_ERR(__wt_schema_create(session, ingest_uri, constituent_cfg));
+    __wt_free(session, constituent_cfg);
+
+    if (conn->layered_table_manager.leader) {
+        stable_cfg[1] = disagg_config->data;
+
+        /* Disable logging on the stable table so we have timestamps. */
+        stable_cfg[3] = "log=(enabled=false)";
+        WT_ERR(__wt_config_merge(session, stable_cfg, NULL, &constituent_cfg));
+        WT_ERR(__wt_schema_create(session, stable_uri, constituent_cfg));
+        __wt_free(session, constituent_cfg);
+
+        /*
+         * Ensure that the new table's metadata would be included in the checkpoint even if it is
+         * empty, in order for the new table to appear in the shared metadata table.
+         */
+        WT_ERR(__wt_disagg_copy_metadata_later(session, stable_uri, tablename));
+    }
+
+err:
+    __wt_scr_free(session, &disagg_config);
+    __wt_scr_free(session, &ingest_uri_buf);
+    __wt_scr_free(session, &stable_uri_buf);
+    __wt_scr_free(session, &tmp);
+    __wt_free(session, meta_value);
+    __wt_free(session, tablecfg);
+    __wt_free(session, constituent_cfg);
+
+    return (ret);
+}
+
+/*
  * __tiered_metadata_insert --
  *     Wrapper function to insert the tiered object metadata entry.
  */
@@ -1093,7 +1164,7 @@ __create_tiered(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const
     char *meta_value;
     const char *cfg[5] = {WT_CONFIG_BASE(session, tiered_meta), NULL, NULL, NULL, NULL};
     const char *metadata;
-    bool free_metadata;
+    bool free_metadata, shared;
 
     conn = S2C(session);
     metadata = NULL;
@@ -1107,6 +1178,13 @@ __create_tiered(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const
         goto err;
     }
     WT_RET_NOTFOUND_OK(ret);
+
+    /*
+     * Make sure we're not trying to share a tiered table.
+     */
+    WT_RET(__wt_btree_shared(session, uri, cfg, &shared));
+    if (shared)
+        WT_RET_MSG(session, EINVAL, "sharing tiered tables is unsupported");
 
     /*
      * We're creating a tiered table. Set the initial tiers list to empty. Opening the table will
@@ -1125,8 +1203,9 @@ __create_tiered(WT_SESSION_IMPL *session, const char *uri, bool exclusive, const
             WT_ERR(__wt_buf_fmt(session, tmp,
               ",tiered_storage=(bucket=%s,bucket_prefix=%s)"
               ",id=%" PRIu32 ",version=(major=%" PRIu16 ",minor=%" PRIu16 "),checkpoint_lsn=",
-              conn->bstorage->bucket, conn->bstorage->bucket_prefix, ++conn->next_file_id,
-              WT_BTREE_VERSION_MAX.major, WT_BTREE_VERSION_MAX.minor));
+              conn->bstorage->bucket, conn->bstorage->bucket_prefix,
+              WT_BTREE_ID_NAMESPACED(++conn->next_file_id), WT_BTREE_VERSION_MAX.major,
+              WT_BTREE_VERSION_MAX.minor));
             cfg[1] = tmp->data;
             cfg[2] = config;
             cfg[3] = "tiers=()";
@@ -1272,7 +1351,9 @@ __create_fix_file_ids(WT_SESSION_IMPL *session, WT_IMPORT_LIST *import_list)
         /* Generate a new file ID. */
         if (import_list->entries[i].file_id != prev_file_id) {
             prev_file_id = import_list->entries[i].file_id;
-            new_file_id = ++conn->next_file_id;
+            new_file_id = WT_BTREE_ID_NAMESPACED(++conn->next_file_id);
+            if (WT_BTREE_ID_SHARED(prev_file_id))
+                WT_RET_MSG(session, EINVAL, "TODO cannot import a shared table");
         }
 
         /* Update config with the new file ID. */
@@ -1423,10 +1504,10 @@ __schema_create(WT_SESSION_IMPL *session, const char *uri, const char *config)
         ret = __create_colgroup(session, uri, exclusive, config);
     else if (WT_PREFIX_MATCH(uri, "file:"))
         ret = __create_file(session, uri, exclusive, config);
-    else if (WT_PREFIX_MATCH(uri, "lsm:"))
-        ret = __wt_lsm_tree_create(session, uri, exclusive, config);
     else if (WT_PREFIX_MATCH(uri, "index:"))
         ret = __create_index(session, uri, exclusive, config);
+    else if (WT_PREFIX_MATCH(uri, "layered:"))
+        ret = __create_layered(session, uri, exclusive, config);
     else if (WT_PREFIX_MATCH(uri, "object:"))
         ret = __create_object(session, uri, exclusive, config);
     else if (WT_PREFIX_MATCH(uri, "table:"))

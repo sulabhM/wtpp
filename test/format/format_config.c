@@ -30,7 +30,6 @@
 
 static void config_backup_incr(void);
 static void config_backup_incr_granularity(void);
-static void config_backup_incr_log_compatibility_check(void);
 static void config_backward_compatible(void);
 static void config_cache(void);
 static void config_checkpoint(void);
@@ -38,19 +37,19 @@ static void config_checksum(TABLE *);
 static void config_chunk_cache(void);
 static void config_compact(void);
 static void config_compression(TABLE *, const char *);
-static void config_directio(void);
+static void config_disagg_storage(void);
 static void config_encryption(void);
 static bool config_explicit(TABLE *, const char *);
 static const char *config_file_type(u_int);
 static bool config_fix(TABLE *);
 static void config_in_memory(void);
 static void config_in_memory_reset(void);
-static void config_lsm_reset(TABLE *);
-static void config_map_backup_incr(const char *, u_int *);
+static void config_map_backup_incr(const char *, bool *);
 static void config_map_checkpoint(const char *, u_int *);
 static void config_map_file_type(const char *, u_int *);
 static void config_mirrors(void);
 static void config_mirrors_disable_reverse(void);
+static void config_obsolete_cleanup(void);
 static void config_off(TABLE *, const char *);
 static void config_off_all(const char *);
 static void config_pct(TABLE *);
@@ -157,7 +156,17 @@ config_random(TABLE *table, bool table_only)
         if (F_ISSET(cp, C_BOOL))
             testutil_snprintf(buf, sizeof(buf), "%s=%s", cp->name,
               mmrand(&g.data_rnd, 1, 100) <= cp->min ? "on" : "off");
-        else
+        else if (F_ISSET(cp, C_POW2)) {
+            double max, min;
+            uint32_t vbits, val_p2;
+
+            max = log2((double)cp->maxrand);
+            testutil_assert(max < 32);
+            min = log2((double)cp->min);
+            vbits = mmrand(&g.data_rnd, (uint32_t)min, (uint32_t)max);
+            val_p2 = (uint32_t)(1 << vbits);
+            testutil_snprintf(buf, sizeof(buf), "%s=%" PRIu32, cp->name, val_p2);
+        } else
             testutil_snprintf(
               buf, sizeof(buf), "%s=%" PRIu32, cp->name, mmrand(&g.data_rnd, cp->min, cp->maxrand));
         config_single(table, buf, false);
@@ -200,7 +209,7 @@ config_table_am(TABLE *table)
     }
 
     if (!config_explicit(table, "runs.type")) {
-        if (config_explicit(table, "runs.source") && DATASOURCE(table, "lsm"))
+        if (config_explicit(table, "runs.source") && DATASOURCE(table, "layered"))
             config_single(table, "runs.type=row", false);
         else
             switch (mmrand(&g.data_rnd, 1, 10)) {
@@ -235,27 +244,6 @@ config_table_am(TABLE *table)
             config_single(table, "runs.source=file", false);
             break;
         case 2: /* 20% */
-#if 0
-            /*
-             * We currently disable random LSM testing, that is, it can be specified explicitly but
-             * we won't randomly choose LSM as a data_source configuration.
-             *
-             * LSM requires a row-store and backing disk. Don't configure LSM if in-memory,
-             * timestamps or truncation are configured, they result in cache problems.
-             *
-             * FIXME WT-4162: Remove the timestamp test when WT-4162 resolved.
-             */
-            if (table->type != ROW || GV(RUNS_IN_MEMORY))
-                break;
-            if (config_explicit(NULL, "transaction.timestamps") && GV(TRANSACTION_TIMESTAMPS))
-                break;
-            if (GV(BACKUP) && config_explicit(NULL, "backup.incremental") &&
-              g.backup_incr_flag == INCREMENTAL_BLOCK)
-                break;
-            if (config_explicit(table, "ops.truncate") && TV(OPS_TRUNCATE))
-                break;
-            config_single(table, "runs.source=lsm", false);
-#endif
             /* FALLTHROUGH */
         case 3:
         case 4:
@@ -263,10 +251,6 @@ config_table_am(TABLE *table)
             config_single(table, "runs.source=table", false);
             break;
         }
-
-    /* If data_source and file_type were both set explicitly, we may still have a mismatch. */
-    if (DATASOURCE(table, "lsm") && table->type != ROW)
-        testutil_die(EINVAL, "%s: lsm data_source is only compatible with row file_type", progname);
 }
 
 /*
@@ -283,8 +267,7 @@ config_table(TABLE *table, void *arg)
     testutil_assert(table != NULL);
 
     /*
-     * Choose a file format and a data source: they're interrelated (LSM is only compatible with
-     * row-store) and other items depend on them.
+     * Choose a file format and a data source: they're interrelated and other items depend on them.
      */
     config_table_am(table);
 
@@ -302,8 +285,7 @@ config_table(TABLE *table, void *arg)
                 config_promote(table, cp, &tables[0]->v[cp->off]);
 
     /*
-     * Build the top-level object name: we're overloading data_source in our configuration, LSM
-     * objects are "tables", but files are tested as well.
+     * Build the top-level object name: we're overloading data_source in our configuration.
      */
     if (ntables == 0)
         testutil_snprintf(
@@ -322,15 +304,13 @@ config_table(TABLE *table, void *arg)
     table->max_mem_page = MEGABYTE(TV(BTREE_MEMORY_PAGE_MAX));
 
     /*
-     * Keep the number of rows and keys/values small for in-memory and direct I/O runs (overflow
-     * items aren't an issue for in-memory configurations and it helps prevents cache overflow, and
-     * direct I/O can be so slow the additional I/O for overflow items causes eviction to stall).
+     * Keep the number of rows and keys/values small for in-memory (overflow items aren't an issue
+     * for in-memory configurations and it helps prevents cache overflow).
      */
-    if (GV(RUNS_IN_MEMORY) || GV(DISK_DIRECT_IO)) {
+    if (GV(RUNS_IN_MEMORY)) {
         /*
          * Always limit the row count if it's greater than one million and in memory wasn't
-         * explicitly set. Direct IO is always explicitly set, never limit the row count because the
-         * user has taken control.
+         * explicitly set.
          */
         if (GV(RUNS_IN_MEMORY) && TV(RUNS_ROWS) > WT_MILLION &&
           config_explicit(NULL, "runs.in_memory")) {
@@ -458,12 +438,6 @@ config_table(TABLE *table, void *arg)
     /* Only row-store tables support a collation order. */
     if (table->type != ROW)
         config_off(table, "btree.reverse");
-
-    /* Give LSM a final review and flag if there's at least one LSM data source. */
-    if (DATASOURCE(table, "lsm")) {
-        g.lsm_config = true;
-        config_lsm_reset(table);
-    }
 }
 
 /*
@@ -514,20 +488,24 @@ config_run(void)
 
     tables_apply(config_table, NULL); /* Configure the tables. */
 
+    /* TODO: Temporarily disable salvage test due to increased failures. */
+    config_off(NULL, "ops.salvage");
+
     /* Order can be important, don't shuffle without careful consideration. */
     config_tiered_storage();                         /* Tiered storage */
+    config_disagg_storage();                         /* Disaggregated storage */
     config_chunk_cache();                            /* Chunk cache */
     config_transaction();                            /* Transactions */
     config_backup_incr();                            /* Incremental backup */
     config_checkpoint();                             /* Checkpoints */
     config_compression(NULL, "logging.compression"); /* Logging compression */
-    config_directio();                               /* Direct I/O */
     config_encryption();                             /* Encryption */
     config_in_memory_reset();                        /* Reset in-memory as needed */
     config_backward_compatible();                    /* Reset backward compatibility as needed */
     config_mirrors();                                /* Mirrors */
     config_statistics();                             /* Statistics */
     config_compact();                                /* Compaction */
+    config_obsolete_cleanup();                       /* Obsolete cleanup */
 
     /* Configure the cache last, cache size depends on everything else. */
     config_cache();
@@ -555,9 +533,7 @@ config_backup_incr(void)
      * file removal doesn't seem as useful as testing backup, let the backup configuration override.
      */
     if (config_explicit(NULL, "backup.incremental")) {
-        if (g.backup_incr_flag == INCREMENTAL_LOG)
-            config_backup_incr_log_compatibility_check();
-        if (g.backup_incr_flag == INCREMENTAL_BLOCK)
+        if (g.backup_incr)
             config_backup_incr_granularity();
         return;
     }
@@ -566,26 +542,14 @@ config_backup_incr(void)
      * Choose a type of incremental backup, where the log remove setting can eliminate incremental
      * backup based on log files.
      */
-    switch (mmrand(&g.extra_rnd, 1, 10)) {
-    case 1: /* 30% full backup only */
+    switch (mmrand(&g.extra_rnd, 1, 5)) {
+    case 1: /* 40% full backup only */
     case 2:
-    case 3:
         config_off(NULL, "backup.incremental");
         break;
-    case 4: /* 30% log based incremental */
+    case 3: /* 60% block based incremental */
+    case 4:
     case 5:
-    case 6:
-        if (!GV(LOGGING_REMOVE) || !config_explicit(NULL, "logging.remove")) {
-            if (GV(LOGGING_REMOVE))
-                config_off(NULL, "logging.remove");
-            config_single(NULL, "backup.incremental=log", false);
-            break;
-        }
-    /* FALLTHROUGH */
-    case 7: /* 40% block based incremental */
-    case 8:
-    case 9:
-    case 10:
         config_single(NULL, "backup.incremental=block", false);
         config_backup_incr_granularity();
         break;
@@ -730,10 +694,12 @@ config_cache(void)
     GV(CACHE) = GV(CACHE_MINIMUM);
 
     /*
-     * If it's an in-memory run, size the cache at 2x the maximum initial data set. This calculation
-     * is done in bytes, convert to megabytes before testing against the cache.
+     * If it's an in-memory run or disaggregated follower mode, size the cache at 2x the maximum
+     * initial data set. This calculation is done in bytes, convert to megabytes before testing
+     * against the cache.
      */
-    if (GV(RUNS_IN_MEMORY)) {
+    if (GV(RUNS_IN_MEMORY) ||
+      (g.disagg_storage_config && strcmp(GVS(DISAGG_MODE), "follower") == 0)) {
         cache = table_sumv(V_TABLE_BTREE_KEY_MAX) + table_sumv(V_TABLE_BTREE_VALUE_MAX);
         cache *= table_sumv(V_TABLE_RUNS_ROWS);
         cache *= 2;
@@ -755,24 +721,15 @@ config_cache(void)
     cache = table_sumv(V_TABLE_BTREE_MEMORY_PAGE_MAX); /* in MB units, no conversion to cache */
     cache *= workers;
     cache *= 2;
+
+    if (GV(CHECKPOINT_PRECISE))
+        cache *= 4;
+
     if (GV(CACHE) < cache)
         GV(CACHE) = (uint32_t)cache;
 
-    /*
-     * Ensure cache size sanity for LSM runs. An LSM tree open requires 3 chunks plus a page for
-     * each participant in up to three concurrent merges. Integrate a thread count into that
-     * calculation by requiring 3 chunks/pages per configured thread. That might be overkill, but
-     * LSM runs are more sensitive to small caches than other runs, and a generous cache avoids
-     * stalls we're not interested in chasing.
-     */
-    if (g.lsm_config) {
-        cache = WT_LSM_TREE_MINIMUM_SIZE(table_sumv(V_TABLE_LSM_CHUNK_SIZE) * WT_MEGABYTE,
-          workers * table_sumv(V_TABLE_LSM_MERGE_MAX),
-          workers * table_sumv(V_TABLE_BTREE_LEAF_PAGE_MAX) * WT_MEGABYTE);
-        cache = (cache + (WT_MEGABYTE - 1)) / WT_MEGABYTE;
-        if (GV(CACHE) < cache)
-            GV(CACHE) = (uint32_t)cache;
-    }
+    if (GV(CHECKPOINT_PRECISE) && GV(CACHE) < 2048)
+        GV(CACHE) = 2048;
 
     if (cache_maximum_explicit && GV(CACHE) > GV(CACHE_MAXIMUM))
         GV(CACHE) = GV(CACHE_MAXIMUM);
@@ -783,9 +740,8 @@ config_cache(void)
 
 dirty_eviction_config:
     /* Adjust the dirty eviction settings to reduce test driven cache stuck failures. */
-    if (g.lsm_config || GV(CACHE) < 20) {
-        WARN("Setting cache.eviction_dirty_trigger=95 due to %s",
-          g.lsm_config ? "LSM" : "micro cache");
+    if (GV(CACHE) < 20) {
+        WARN("%s", "Setting cache.eviction_dirty_trigger=95 due to micro cache");
         config_single(NULL, "cache.eviction_dirty_trigger=95", false);
     } else if (GV(CACHE) / workers <= 2 && !config_explicit(NULL, "cache.eviction_dirty_trigger")) {
         WARN("Cache is minimally configured (%" PRIu32
@@ -794,6 +750,15 @@ dirty_eviction_config:
           GV(CACHE));
         config_single(NULL, "cache.eviction_dirty_trigger=40", false);
         config_single(NULL, "cache.eviction_dirty_target=10", false);
+    }
+
+    if (g.disagg_storage_config && strcmp(GVS(DISAGG_MODE), "follower") == 0) {
+        WARN("%s",
+          "Setting cache.eviction_dirty_trigger=95 and cache.eviction_update_trigger=95. In "
+          "disaggregated follower mode, these eviction trigger thresholds are increased to help "
+          "avoid operation thread stalls.");
+        config_single(NULL, "cache.eviction_dirty_trigger=95", false);
+        config_single(NULL, "cache.eviction_updates_trigger=95", false);
     }
 }
 
@@ -813,13 +778,19 @@ config_checkpoint(void)
         case 4: /* 20% */
             config_single(NULL, "checkpoint=wiredtiger", false);
             break;
-        case 5: /* 5 % */
+        case 5: /* 5% */
             config_off(NULL, "checkpoint");
             break;
         default: /* 75% */
             config_single(NULL, "checkpoint=on", false);
+            /* 50% */
+            if (mmrand(&g.extra_rnd, 1, 10) > 5)
+                config_single(NULL, "checkpoint=on", false);
             break;
         }
+
+    if (GV(OPS_PREPARE))
+        config_off(NULL, "checkpoint.precise");
 }
 
 /*
@@ -929,61 +900,6 @@ config_compression(TABLE *table, const char *conf_name)
 }
 
 /*
- * config_directio --
- *     Direct I/O configuration.
- */
-static void
-config_directio(void)
-{
-    /*
-     * We don't roll the dice and set direct I/O, it has to be set explicitly. If there are any
-     * incompatible configurations set explicitly, turn off direct I/O, otherwise turn off the
-     * incompatible configurations.
-     */
-    if (!GV(DISK_DIRECT_IO))
-        return;
-    testutil_assert(config_explicit(NULL, "disk.direct_io") == true);
-
-#undef DIO_CHECK
-#define DIO_CHECK(name, flag)                                                       \
-    if (GV(flag)) {                                                                 \
-        if (config_explicit(NULL, name)) {                                          \
-            WARN("%s not supported with direct I/O, turning off direct I/O", name); \
-            config_off(NULL, "disk.direct_io");                                     \
-            return;                                                                 \
-        }                                                                           \
-        config_off(NULL, name);                                                     \
-    }
-
-    /*
-     * Direct I/O may not work with backups, doing copies through the buffer cache after configuring
-     * direct I/O in Linux won't work. If direct I/O is configured, turn off backups.
-     */
-    DIO_CHECK("backup", BACKUP);
-
-    /* Direct I/O may not work with imports for the same reason as for backups. */
-    DIO_CHECK("import", IMPORT);
-
-    /*
-     * Direct I/O may not work with mmap. Theoretically, Linux ignores direct I/O configurations in
-     * the presence of shared cache configurations (including mmap), but we've seen file corruption
-     * and it doesn't make much sense (the library disallows the combination).
-     */
-    DIO_CHECK("disk.mmap_all", DISK_MMAP_ALL);
-
-    /*
-     * Turn off all external programs. Direct I/O is really, really slow on some machines and it can
-     * take hours for a job to run. External programs don't have timers running so it looks like
-     * format just hung, and the 15-minute timeout isn't effective. We could play games to handle
-     * child process termination, but it's not worth the effort.
-     */
-    DIO_CHECK("ops.salvage", OPS_SALVAGE);
-
-    /* Direct I/O needs buffer alignment to be set automatically. */
-    DIO_CHECK("buffer_alignment", BUFFER_ALIGNMENT);
-}
-
-/*
  * config_encryption --
  *     Encryption configuration.
  */
@@ -1038,8 +954,7 @@ config_in_memory(void)
 {
     /*
      * Configure in-memory before anything else, in-memory has many related requirements. Don't
-     * configure in-memory if there's any incompatible configurations, so we don't have to
-     * reconfigure in-memory every time we configure something like LSM, that's too painful.
+     * configure in-memory if there's any incompatible configurations.
      *
      * Limit the number of tables in any in-memory run, otherwise it's too easy to blow out the
      * cache.
@@ -1124,66 +1039,6 @@ config_in_memory_reset(void)
         config_off(NULL, "ops.verify");
     if (!config_explicit(NULL, "prefetch"))
         config_off(NULL, "prefetch");
-}
-
-/*
- * config_backup_incr_log_compatibility_check --
- *     Backup incremental log compatibility check.
- */
-static void
-config_backup_incr_log_compatibility_check(void)
-{
-    /*
-     * Incremental backup using log files is incompatible with automatic log file removal. Disable
-     * logging removal if log incremental backup is set.
-     */
-    if (GV(LOGGING_REMOVE) && config_explicit(NULL, "logging.remove"))
-        WARN("%s",
-          "backup.incremental=log is incompatible with logging.remove, turning off "
-          "logging.remove");
-    if (GV(LOGGING_REMOVE))
-        config_off(NULL, "logging.remove");
-}
-
-/*
- * config_lsm_reset --
- *     LSM configuration review.
- */
-static void
-config_lsm_reset(TABLE *table)
-{
-    /*
-     * Turn off truncate for LSM runs (some configurations with truncate always result in a
-     * timeout).
-     */
-    if (config_explicit(table, "ops.truncate")) {
-        if (DATASOURCE(table, "lsm"))
-            testutil_die(EINVAL, "LSM (currently) incompatible with truncate configurations");
-        config_off(table, "ops.truncate");
-    }
-
-    /*
-     * Turn off prepare and timestamps for LSM runs (prepare requires timestamps).
-     *
-     * FIXME: WT-4162.
-     */
-    if (config_explicit(NULL, "ops.prepare"))
-        testutil_die(EINVAL, "LSM (currently) incompatible with prepare configurations");
-    config_off(NULL, "ops.prepare");
-    if (config_explicit(NULL, "transaction.timestamps"))
-        testutil_die(EINVAL, "LSM (currently) incompatible with timestamp configurations");
-    config_off(NULL, "transaction.timestamps");
-
-    /*
-     * LSM does not work with block-based incremental backup, change the incremental backup
-     * mechanism if configured to be block based.
-     */
-    if (GV(BACKUP)) {
-        if (config_explicit(NULL, "backup.incremental"))
-            testutil_die(
-              EINVAL, "LSM (currently) incompatible with incremental backup configurations");
-        config_single(NULL, "backup.incremental=log", false);
-    }
 }
 
 /*
@@ -1624,6 +1479,48 @@ config_tiered_storage(void)
 }
 
 /*
+ * config_disagg_storage --
+ *     Disaggregated storage configuration.
+ */
+static void
+config_disagg_storage(void)
+{
+    char buf[128];
+    const char *mode, *page_log;
+
+    page_log = GVS(DISAGG_PAGE_LOG);
+
+    g.disagg_storage_config = (strcmp(page_log, "off") != 0 && strcmp(page_log, "none") != 0);
+    if (g.disagg_storage_config) {
+        if (config_explicit(NULL, "disagg.mode")) {
+            mode = GVS(DISAGG_MODE);
+            if (strcmp(mode, "leader") != 0 && strcmp(mode, "follower") != 0)
+                testutil_die(EINVAL, "illegal disagg.mode configuration: %s", mode);
+        } else {
+            /* Randomly assign "leader" or "follower" to disagg.mode with equal probability. */
+            testutil_snprintf(buf, sizeof(buf), "disagg.mode=%s",
+              mmrand(&g.data_rnd, 1, 100) <= 50 ? "leader" : "follower");
+            config_single(NULL, buf, false);
+        }
+
+        /* Disaggregated storage requires timestamps. */
+        config_off(NULL, "transaction.implicit");
+        config_single(NULL, "transaction.timestamps=on", true);
+
+        /* It makes sense to do checkpoints. */
+        config_single(NULL, "checkpoint=on", false);
+
+        /* TODO: Some operations are not yet supported for disaggregated storage. */
+        config_off(NULL, "ops.salvage");
+        config_off(NULL, "ops.verify");
+        config_off(NULL, "backup");
+        config_off(NULL, "backup.incremental");
+        config_off(NULL, "ops.compaction");
+        config_off(NULL, "background_compact");
+    }
+}
+
+/*
  * config_transaction --
  *     Transaction configuration.
  */
@@ -1696,8 +1593,10 @@ config_transaction(void)
         config_off(NULL, "ops.salvage");
         config_off(NULL, "logging");
     }
-    if (!GV(TRANSACTION_TIMESTAMPS))
+    if (!GV(TRANSACTION_TIMESTAMPS)) {
         config_off(NULL, "ops.prepare");
+        config_off(NULL, "checkpoint.precise");
+    }
 
     /* Set a default transaction timeout limit if one is not specified. */
     if (!config_explicit(NULL, "transaction.operation_timeout_ms"))
@@ -1777,20 +1676,15 @@ config_print_table(FILE *fp, TABLE *table)
     CONFIG *cp;
     CONFIGV *v, *gv;
     char buf[128];
-    bool lsm;
 
     testutil_snprintf(buf, sizeof(buf), "table%u.", table->id);
     fprintf(fp, "############################################\n");
     fprintf(fp, "#  TABLE PARAMETERS: table %u\n", table->id);
     fprintf(fp, "############################################\n");
 
-    lsm = DATASOURCE(table, "lsm");
     for (cp = configuration_list; cp->name != NULL; ++cp) {
         /* Skip global items. */
         if (!F_ISSET(cp, C_TABLE))
-            continue;
-        /* Skip mismatched objects and configurations. */
-        if (!lsm && F_ISSET(cp, C_TYPE_LSM))
             continue;
         if (!C_TYPE_MATCH(cp, table->type))
             continue;
@@ -1837,10 +1731,6 @@ config_print(bool error_display)
     for (cp = configuration_list; cp->name != NULL; ++cp) {
         /* Skip table count if tables not configured (implying an old-style CONFIG file). */
         if (ntables == 0 && cp->off == V_GLOBAL_RUNS_TABLES)
-            continue;
-
-        /* Skip mismatched objects and configurations. */
-        if (!g.lsm_config && F_ISSET(cp, C_TYPE_LSM))
             continue;
 
         /* Skip mismatched table items if the global table is the only table. */
@@ -2115,12 +2005,12 @@ config_single(TABLE *table, const char *s, bool explicit)
             equalp = "off";
 
         if (strncmp(s, "backup.incremental", strlen("backup.incremental")) == 0)
-            config_map_backup_incr(equalp, &g.backup_incr_flag);
+            config_map_backup_incr(equalp, &g.backup_incr);
         else if (strncmp(s, "checkpoint", strlen("checkpoint")) == 0)
             config_map_checkpoint(equalp, &g.checkpoint_config);
         else if (strncmp(s, "runs.source", strlen("runs.source")) == 0 &&
           strncmp("file", equalp, strlen("file")) != 0 &&
-          strncmp("lsm", equalp, strlen("lsm")) != 0 &&
+          strncmp("layered", equalp, strlen("layered")) != 0 &&
           strncmp("table", equalp, strlen("table")) != 0) {
             testutil_die(EINVAL, "Invalid data source option: %s", equalp);
         } else if (strncmp(s, "runs.type", strlen("runs.type")) == 0) {
@@ -2150,6 +2040,16 @@ config_single(TABLE *table, const char *s, bool explicit)
             if (v1 != 0 && v1 != 1)
                 testutil_die(EINVAL, "%s: %s: value of boolean not 0 or 1", progname, s);
         }
+
+        v->v = v1;
+        v->set = explicit;
+        return;
+    }
+
+    if (F_ISSET(cp, C_POW2)) {
+        v1 = atou32(s, equalp, '\0');
+        if (v1 != 0 && !__wt_ispo2(v1))
+            testutil_die(EINVAL, "%s: %s: value is not a power of 2", progname, s);
 
         v->v = v1;
         v->set = explicit;
@@ -2288,17 +2188,18 @@ config_map_file_type(const char *s, u_int *vp)
 
 /*
  * config_map_backup_incr --
- *     Map a incremental backup configuration to a flag.
+ *     Map an incremental backup configuration to a flag.
  */
 static void
-config_map_backup_incr(const char *s, u_int *vp)
+config_map_backup_incr(const char *s, bool *vp)
 {
     if (strcmp(s, "block") == 0)
-        *vp = INCREMENTAL_BLOCK;
-    else if (strcmp(s, "log") == 0)
-        *vp = INCREMENTAL_LOG;
+        *vp = true;
     else if (strcmp(s, "off") == 0)
-        *vp = INCREMENTAL_OFF;
+        *vp = false;
+    /* Compatibility for old configurations. */
+    else if (strcmp(s, "log") == 0)
+        *vp = false;
     else
         testutil_die(EINVAL, "illegal incremental backup configuration: %s", s);
 }
@@ -2393,5 +2294,27 @@ config_compact(void)
               EINVAL, "%s: Foreground compaction cannot be enabled for in-memory runs", progname);
         config_off(NULL, "background_compact");
         config_off(NULL, "ops.compaction");
+    }
+}
+
+/*
+ * config_obsolete_cleanup --
+ *     Obsolete cleanup configuration.
+ */
+static void
+config_obsolete_cleanup(void)
+{
+    uint32_t wait_seconds;
+    char confbuf[128];
+
+    if (!config_explicit(NULL, "obsolete_cleanup.method")) {
+        if (mmrand(&g.extra_rnd, 1, 10) < 2)
+            config_single(NULL, "obsolete_cleanup.method=reclaim_space", false);
+    }
+
+    if (!config_explicit(NULL, "obsolete_cleanup.wait")) {
+        wait_seconds = mmrand(&g.extra_rnd, 1, 3600);
+        testutil_snprintf(confbuf, sizeof(confbuf), "obsolete_cleanup.wait=%" PRIu32, wait_seconds);
+        config_single(NULL, confbuf, false);
     }
 }

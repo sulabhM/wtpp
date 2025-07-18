@@ -30,15 +30,16 @@
 #       session level operations on tables
 #
 
-import wttest
+from test_truncate01 import test_truncate_base
 from wtdataset import SimpleDataSet
 from wtscenario import make_scenarios
+import wttest
 
 # test_truncate_fast_delete
 #       When deleting leaf pages that aren't in memory, we set transactional
 # information in the page's WT_REF structure, which results in interesting
 # issues.
-class test_truncate_fast_delete(wttest.WiredTigerTestCase):
+class test_truncate_fast_delete(test_truncate_base):
     name = 'test_truncate'
     nentries = 10000
 
@@ -47,6 +48,10 @@ class test_truncate_fast_delete(wttest.WiredTigerTestCase):
     types = [
         ('file', dict(type='file:', config=\
             'allocation_size=512,leaf_page_max=512')),
+        # FIXME-WT-14998 Re-enable the layered table scenario once disaggregated storage works with truncate tests.
+        # Consider whether we need this scenario here if the scenario is already defined in the test truncate base test.
+        # ('layered', dict(type='layered:', config=\
+        #     'allocation_size=512,leaf_page_max=512'))
     ]
 
     # This is all about testing the btree layer, not the schema layer, test
@@ -85,7 +90,7 @@ class test_truncate_fast_delete(wttest.WiredTigerTestCase):
         ('txn2', dict(commit=False)),
         ]
 
-    scenarios = make_scenarios(types, keyfmt, overflow, reads, writes, txn,
+    scenarios = make_scenarios(test_truncate_base.disagg_storages, types, keyfmt, overflow, reads, writes, txn,
                                prune=20, prunelong=1000)
 
     # Return the number of records visible to the cursor; test both forward
@@ -137,8 +142,11 @@ class test_truncate_fast_delete(wttest.WiredTigerTestCase):
                 cursor.update()
             cursor.close()
 
+        # FIXME-WT-14977 Remove the conditional for layered tables once disaggregated storage can handle checkpoint id after restart.
+        if self.type != 'layered:':
+            self.session.checkpoint()
         # Close and re-open it so we get a disk image, not an insert skiplist.
-        self.reopen_conn()
+            self.reopen_conn()
 
         # Optionally read/write a few rows before truncation.
         if self.readbefore or self.writebefore:

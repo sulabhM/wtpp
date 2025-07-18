@@ -60,9 +60,14 @@ extern "C" {
 #define LAZYFS_CONTROL_FILE_TEMPLATE "lazyfs-control-XXXXXX" LAZYFS_CONTROL_FILE_SUFFIX
 #define LAZYFS_LOG_FILE "lazyfs.log"
 
+/* Subdirectory name for MongoDB per directory db usage. */
+#define SUB_DIR "sub_dir"
+
 #ifdef _WIN32
 #include "windows_shim.h"
 #endif
+
+#define PALM_DISAGG_STORAGE "palm"
 
 #define DIR_STORE_BUCKET_NAME "bucket"
 #define S3_DEFAULT_BUCKET_NAME "s3testext;ap-southeast-2"
@@ -70,6 +75,13 @@ extern "C" {
 #define DIR_STORE "dir_store"
 #define S3_STORE "s3_store"
 
+#define TESTUTIL_ENV_CONFIG_DISAGG          \
+    ",disaggregated=(role=%s,page_log=%s)," \
+    "checkpoint=(precise=true)"
+#define TESTUTIL_ENV_CONFIG_DISAGG_EXT                                         \
+    "\"%s/ext/page_log/%s/libwiredtiger_%s.so\"=("                             \
+    "config=\"(delay_ms=%" PRIu64 ",error_ms=%" PRIu64 ",force_delay=%" PRIu64 \
+    ",force_error=%" PRIu64 ",cache_size_mb=%" PRIu64 ",verbose=0)\")"
 #define TESTUTIL_ENV_CONFIG_TIERED               \
     ",tiered_storage=(bucket=%s"                 \
     ",bucket_prefix=%s,local_retention=%" PRIu32 \
@@ -93,6 +105,8 @@ typedef struct {
 
     const char *progname;        /* Truncated program name */
     char *build_dir;             /* Build directory path */
+    char *disagg_mode;           /* Disaggregated storage mode */
+    char *disagg_page_log;       /* Page and log service for disaggregated storage */
     char *tiered_storage_source; /* Tiered storage source */
 
     enum {
@@ -110,14 +124,16 @@ typedef struct {
     uint64_t data_seed;      /* Random seed for data ops */
     uint64_t extra_seed;     /* Random seed for extra ops */
 
-    uint64_t delay_ms;        /* Average length of delay when simulated */
-    uint64_t error_ms;        /* Average length of delay when simulated */
-    uint64_t force_delay;     /* Force a simulated network delay every N operations */
-    uint64_t force_error;     /* Force a simulated network error every N operations */
-    uint32_t local_retention; /* Local retention for tiered storage */
+    uint64_t delay_ms;         /* Average length of delay when simulated */
+    uint64_t error_ms;         /* Average length of delay when simulated */
+    uint64_t force_delay;      /* Force a simulated network delay every N operations */
+    uint64_t force_error;      /* Force a simulated network error every N operations */
+    uint32_t local_retention;  /* Local retention for tiered storage */
+    uint64_t palm_map_size_mb; /* Megabytes of map size for PALM database */
 
     bool absolute_bucket_dir;  /* Use an absolute bucket path when it is a directory */
     bool compat;               /* Compatibility */
+    bool disagg_storage;       /* Uses disaggregated storage */
     bool do_data_ops;          /* Have schema ops use data */
     bool inmem;                /* In-memory */
     bool make_bucket_dir;      /* Create bucket when it is a directory */
@@ -534,17 +550,19 @@ void testutil_backup_create_incremental(
 void testutil_backup_force_stop(WT_SESSION *);
 void testutil_backup_force_stop_conn(WT_CONNECTION *);
 void testutil_build_dir(TEST_OPTS *, char *, int);
-void testutil_clean_test_artifacts(const char *);
+void testutil_clean_test_artifacts(void);
 void testutil_cleanup(TEST_OPTS *);
 void testutil_copy(const char *, const char *);
-void testutil_copy_data(const char *);
-void testutil_copy_data_opt(const char *, const char *);
+void testutil_copy_data(void);
+void testutil_copy_data_opt(const char *);
 void testutil_copy_ext(const char *, const char *, const WT_FILE_COPY_OPTS *opts);
 void testutil_copy_file(WT_SESSION *, const char *);
 void testutil_copy_if_exists(WT_SESSION *, const char *);
-void testutil_create_backup_directory(const char *);
+void testutil_create_backup_directory(const char *, uint64_t, bool);
 void testutil_deduce_build_dir(TEST_OPTS *opts);
 void testutil_delete_old_backups(int);
+void testutil_disagg_storage_configuration(
+  TEST_OPTS *, const char *, char *, size_t, char *, size_t);
 bool testutil_exists(const char *, const char *);
 int testutil_general_event_handler(
   WT_EVENT_HANDLER *, WT_CONNECTION *, WT_SESSION *, WT_EVENT_TYPE, void *);
@@ -555,6 +573,7 @@ void testutil_lazyfs_setup(WT_LAZY_FS *, const char *);
 void testutil_mkdir(const char *);
 void testutil_mkdir_ext(const char *, const WT_MKDIR_OPTS *);
 void testutil_modify_apply(WT_ITEM *, WT_ITEM *, WT_MODIFY *, int, uint8_t);
+void testutil_move(const char *source, const char *dest);
 uint64_t testutil_pareto(uint64_t, uint64_t, u_int);
 void testutil_parse_begin_opt(int, char *const *, const char *, TEST_OPTS *);
 void testutil_parse_end_opt(TEST_OPTS *);
@@ -584,7 +603,6 @@ void testutil_tiered_storage_configuration(
   TEST_OPTS *, const char *, char *, size_t, char *, size_t);
 uint64_t testutil_time_us(WT_SESSION *);
 void testutil_verify_model(TEST_OPTS *opts, const char *);
-void testutil_verify_src_backup(WT_CONNECTION *, const char *, const char *, char *);
 void testutil_work_dir_from_path(char *, size_t, const char *);
 WT_THREAD_RET thread_append(void *);
 

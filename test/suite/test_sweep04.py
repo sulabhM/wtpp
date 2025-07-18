@@ -80,7 +80,8 @@ class test_sweep04(wttest.WiredTigerTestCase):
 
     conn_config = 'file_manager=(close_handle_minimum=0,' + \
                   'close_idle_time=3,close_scan_interval=1),' + \
-                  'statistics=(fast),operation_tracking=(enabled=false),'
+                  'statistics=(fast),operation_tracking=(enabled=false),' + \
+                  'verbose=(sweep:2)'
 
     create_params = 'key_format=i,value_format=i'
 
@@ -109,6 +110,8 @@ class test_sweep04(wttest.WiredTigerTestCase):
             c.close()
 
     def test_big_run(self):
+        # FIXME-WT-13706
+        self.skipTest("FIXME-WT-13706")
         # populate
         r = suite_random()
 

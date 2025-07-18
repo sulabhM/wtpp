@@ -29,7 +29,9 @@
 from test_cc01 import test_cc_base
 from suite_subprocess import suite_subprocess
 from wiredtiger import stat
+import os
 import time
+import wttest
 
 # test_checkpoint33.py
 #
@@ -78,7 +80,13 @@ class test_checkpoint33(test_cc_base, suite_subprocess):
         self.session.rollback_transaction()
         evict_cursor.close()
 
+    # FIXME-WT-14982
+    @wttest.skip_for_hook("disagg", "PALM environment mapsize limitation")
     def test_checkpoint33(self):
+
+        if os.environ.get("TSAN_OPTIONS"):
+            self.skipTest("FIXME-WT-14098 This test fails to compress the table when run under TSan")
+
         # Pin oldest timestamp 1.
         self.conn.set_timestamp(f'oldest_timestamp={self.timestamp_str(1)}')
 

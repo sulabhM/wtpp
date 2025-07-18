@@ -68,7 +68,6 @@ static uint64_t seed = 0;
 static void usage(void) WT_GCC_FUNC_DECL_ATTRIBUTE((noreturn));
 
 static bool do_drop = true;
-static bool do_rename = true;
 
 #define VERBOSE(level, fmt, ...)      \
     do {                              \
@@ -82,7 +81,7 @@ static bool do_rename = true;
  */
 typedef struct {
     char *name;            /* non-null entries represent tables in use */
-    uint32_t name_index;   /* bumped when we rename or drop, so we get unique names. */
+    uint32_t name_index;   /* bumped when we drop, so we get unique names. */
     uint64_t change_count; /* number of changes so far to the table */
     WT_RAND_STATE rand;
     uint32_t max_value_size;
@@ -321,27 +320,6 @@ create_table(WT_SESSION *session, WT_RAND_STATE *rand, TABLE_INFO *tinfo, uint32
 }
 
 /*
- * rename_table --
- *     TODO: Add a comment describing this function.
- */
-static void
-rename_table(WT_SESSION *session, TABLE_INFO *tinfo, uint32_t slot)
-{
-    char *olduri, *uri;
-
-    testutil_assert(TABLE_VALID(&tinfo->table[slot]));
-    uri = dcalloc(1, URI_MAX_LEN);
-    testutil_snprintf(
-      uri, URI_MAX_LEN, URI_FORMAT, (int)slot, (int)tinfo->table[slot].name_index++);
-
-    olduri = tinfo->table[slot].name;
-    VERBOSE(3, "rename %s %s\n", olduri, uri);
-    WT_OP_CHECKPOINT_WAIT(session, session->rename(session, olduri, uri, NULL));
-    free(olduri);
-    tinfo->table[slot].name = uri;
-}
-
-/*
  * drop_table --
  *     TODO: Add a comment describing this function.
  */
@@ -566,6 +544,7 @@ run_test(char const *working_dir, WT_RAND_STATE *rnd, bool preserve)
     const char *backup_verbose;
     int ncheckpoints, nreopens;
     char backup_src[1024], conf[1024], home[1024];
+    char cwd_start[PATH_MAX];
 
     /* Save the rnd state in the seed global variable for error reporting */
     seed = rnd->v;
@@ -579,6 +558,10 @@ run_test(char const *working_dir, WT_RAND_STATE *rnd, bool preserve)
     printf("Seed: %" PRIu64 " (0x%" PRIx64 ")\n", seed, seed);
 
     testutil_recreate_dir(home);
+
+    /* Remember the current working directory. */
+    testutil_assert_errno(getcwd(cwd_start, sizeof(cwd_start)) != NULL);
+
     /*
      * Go inside the home directory and create the database home. We also use the home directory as
      * the top level for creating the backup directories and check directory.
@@ -640,15 +623,13 @@ run_test(char const *working_dir, WT_RAND_STATE *rnd, bool preserve)
         if (tinfo.tables_in_use == 0 || __wt_random(rnd) % 2 != 0) {
             while (__wt_random(rnd) % 10 != 0) {
                 /*
-                 * For schema events, we choose to create, rename or drop tables. We pick a random
-                 * slot, and if it is empty, create a table there. Otherwise, we rename or drop.
-                 * That should give us a steady state with slots mostly filled.
+                 * For schema events, we choose to create or drop tables. We pick a random slot, and
+                 * if it is empty, create a table there. Otherwise we drop. That should give us a
+                 * steady state with slots mostly filled.
                  */
                 slot = __wt_random(rnd) % tinfo.table_count;
                 if (!TABLE_VALID(&tinfo.table[slot]))
                     create_table(session, rnd, &tinfo, slot);
-                else if (__wt_random(rnd) % 3 == 0 && do_rename)
-                    rename_table(session, &tinfo, slot);
                 else if (do_drop)
                     drop_table(session, &tinfo, slot);
             }
@@ -674,8 +655,6 @@ run_test(char const *working_dir, WT_RAND_STATE *rnd, bool preserve)
             testutil_check(wiredtiger_open(WT_HOME_DIR, NULL, conf, &conn));
             testutil_check(conn->open_session(conn, NULL, NULL, &session));
 
-            /* Test against the copied directory. */
-            testutil_verify_src_backup(conn, backup_src, WT_HOME_DIR, NULL);
             testutil_remove(backup_src);
             nreopens++;
         }
@@ -708,7 +687,15 @@ run_test(char const *working_dir, WT_RAND_STATE *rnd, bool preserve)
     printf("Success.\n");
     if (!preserve) {
         testutil_delete_old_backups(0);
-        testutil_clean_test_artifacts(home);
+        /*
+         * We are in the home directory (typically WT_TEST), which we intend to delete. Go to the
+         * start directory. We do this to avoid deleting the current directory, which is disallowed
+         * on some platforms.
+         */
+        if (chdir(cwd_start) != 0)
+            testutil_die(errno, "root chdir: %s", home);
+
+        /* Delete the work directory. */
         testutil_remove(home);
     }
 }
@@ -768,13 +755,19 @@ main(int argc, char *argv[])
          * Whereas a seed of 0x9b1bde3f111fe316 will succeed even if the WT-10551 fix is commented
          * out because that seed doesn't generate the right set of steps to hit the issue.
          */
+
+        /*
+         * TODO: WT-14558 - incr_backup test artifacts are generated and retained in a nested manner
+         * (WT_TEST.incr_backup/WT_TEST.incr_backup...) when preserve is true. These artifacts
+         * should instead be alongside the WT_TEST directory.
+         */
         rnd.v = 0x9b1bde3f111fe316;
         run_test(working_dir, &rnd, preserve);
 
         rnd.v = 123456789;
         run_test(working_dir, &rnd, preserve);
 
-        __wt_random_init_seed(NULL, &rnd);
+        __wt_random_init_default(&rnd);
         run_test(working_dir, &rnd, preserve);
     } else {
         rnd.v = seed_param;

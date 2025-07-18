@@ -301,6 +301,51 @@ operator<<(std::ostream &out, const checkpoint &op)
 }
 
 /*
+ * checkpoint_crash --
+ *     A representation of this workload operation.
+ */
+struct checkpoint_crash : public without_txn_id, public without_table_id {
+    uint64_t crash_step;
+
+    /*
+     * checkpoint_crash::checkpoint_crash --
+     *     Create the operation.
+     */
+    inline checkpoint_crash(const uint64_t crash_step) : crash_step(crash_step) {}
+
+    /*
+     * checkpoint_crash::operator== --
+     *     Compare for equality.
+     */
+    inline bool
+    operator==(const checkpoint_crash &other) const noexcept
+    {
+        return crash_step == other.crash_step;
+    }
+
+    /*
+     * checkpoint_crash::operator!= --
+     *     Compare for inequality.
+     */
+    inline bool
+    operator!=(const checkpoint_crash &other) const noexcept
+    {
+        return !(*this == other);
+    }
+};
+
+/*
+ * operator<< --
+ *     Human-readable output.
+ */
+inline std::ostream &
+operator<<(std::ostream &out, const checkpoint_crash &op)
+{
+    out << "checkpoint_crash(" << op.crash_step << ")";
+    return out;
+}
+
+/*
  * commit_transaction --
  *     A representation of this workload operation.
  */
@@ -492,6 +537,54 @@ inline std::ostream &
 operator<<(std::ostream &out, const evict &op)
 {
     out << "evict(" << op.table_id << ", " << op.key << ")";
+    return out;
+}
+
+/*
+ * get --
+ *     A representation of reading a given key. Does not state the expected value.
+ */
+struct get : public with_txn_id, public with_table_id {
+    data_value key;
+
+    /*
+     * get::get --
+     *     Create the operation.
+     */
+    inline get(table_id_t table_id, txn_id_t txn_id, const data_value &key)
+        : with_txn_id(txn_id), with_table_id(table_id), key(key)
+    {
+    }
+
+    /*
+     * get::operator== --
+     *     Compare for equality.
+     */
+    inline bool
+    operator==(const get &other) const noexcept
+    {
+        return table_id == other.table_id && txn_id == other.txn_id && key == other.key;
+    }
+
+    /*
+     * get::operator!= --
+     *     Compare for inequality.
+     */
+    inline bool
+    operator!=(const get &other) const noexcept
+    {
+        return !(*this == other);
+    }
+};
+
+/*
+ * operator<< --
+ *     Human-readable output.
+ */
+inline std::ostream &
+operator<<(std::ostream &out, const get &op)
+{
+    out << "get(" << op.table_id << ", " << op.txn_id << ", " << op.key << ")";
     return out;
 }
 
@@ -1069,10 +1162,10 @@ operator<<(std::ostream &out, const wt_config &op)
  * any --
  *     Any workload operation.
  */
-using any = std::variant<begin_transaction, breakpoint, checkpoint, commit_transaction, crash,
-  create_table, evict, insert, nop, prepare_transaction, remove, restart, rollback_to_stable,
-  rollback_transaction, set_commit_timestamp, set_oldest_timestamp, set_stable_timestamp, truncate,
-  wt_config>;
+using any = std::variant<begin_transaction, breakpoint, checkpoint, checkpoint_crash,
+  commit_transaction, crash, create_table, evict, get, insert, nop, prepare_transaction, remove,
+  restart, rollback_to_stable, rollback_transaction, set_commit_timestamp, set_oldest_timestamp,
+  set_stable_timestamp, truncate, wt_config>;
 
 /*
  * operator<< --

@@ -6,8 +6,7 @@
  * See the file LICENSE for redistribution information.
  */
 
-#ifndef __WT_MISC_H
-#define __WT_MISC_H
+#pragma once
 
 /*
  * When compiling for code coverage measurement it is necessary to ensure that inline functions in
@@ -275,6 +274,33 @@ FLD_AREALLSET(uint64_t field, uint64_t mask)
     qsort(base, nmemb, size, compar)
 
 /*
+ * Merge two sorted arrays into a single sorted array. With `prefer_latest` true, if duplicate keys
+ * are found, the element from the later array (arr2) is preferred.
+ */
+#define WT_MERGE_SORT(                                                                        \
+  session, arr1, arr1_size, arr2, arr2_size, cmp, prefer_latest, merged_arr, merged_arr_size) \
+    do {                                                                                      \
+        uint32_t __i, __j, __k;                                                               \
+        int __compar;                                                                         \
+        __i = __j = __k = 0;                                                                  \
+        while (__i < (arr1_size) && __j < (arr2_size)) {                                      \
+            __compar = (cmp)((session), (arr1)[__i], (arr2)[__j]);                            \
+            if (__compar < 0)                                                                 \
+                (merged_arr)[__k++] = (arr1)[__i++];                                          \
+            else {                                                                            \
+                (merged_arr)[__k++] = (arr2)[__j++];                                          \
+                if ((prefer_latest) && __compar == 0)                                         \
+                    __i++; /* Skip corresponding element from arr1 */                         \
+            }                                                                                 \
+        }                                                                                     \
+        while (__j < (arr2_size))                                                             \
+            (merged_arr)[__k++] = (arr2)[__j++];                                              \
+        while (__i < (arr1_size))                                                             \
+            (merged_arr)[__k++] = (arr1)[__i++];                                              \
+        (merged_arr_size) = __k;                                                              \
+    } while (0)
+
+/*
  * Binary search for an integer key.
  */
 #define WT_BINARY_SEARCH(key, arrayp, n, found)                        \
@@ -320,7 +346,7 @@ FLD_AREALLSET(uint64_t field, uint64_t mask)
 
 /* Check if a string matches a suffix. */
 #define WT_SUFFIX_MATCH(str, sfx) \
-    (strlen(str) >= strlen(sfx) && strcmp(&str[strlen(str) - strlen(sfx)], sfx) == 0)
+    (strlen(str) >= strlen(sfx) && strcmp(&(str)[strlen(str) - strlen(sfx)], sfx) == 0)
 
 /* Check if a string matches a prefix, and move past it. */
 #define WT_PREFIX_SKIP(str, pfx) (WT_PREFIX_MATCH(str, pfx) ? ((str) += strlen(pfx), 1) : 0)
@@ -389,6 +415,13 @@ __wt_string_match(const char *str, const char *bytes, size_t len)
     do {                         \
         (dst).data = (src).data; \
         (dst).size = (src).size; \
+    } while (0)
+
+/* Transfer ownership of an item. */
+#define WT_ITEM_MOVE(dst, src) \
+    do {                       \
+        (dst) = (src);         \
+        WT_CLEAR(src);         \
     } while (0)
 
 /*
@@ -483,5 +516,17 @@ union __wt_rand_state {
             WT_ERR(__wt_buf_extend(session, buf, (buf)->size + __len + 1));     \
         }                                                                       \
     } while (0)
-
-#endif /* __WT_MISC_H */
+/*
+ * __wt_atomic_decrement_if_positive --
+ *     Use compare and swap to atomically decrement value by 1 if it's positive.
+ */
+static WT_INLINE void
+__wt_atomic_decrement_if_positive(uint32_t *valuep)
+{
+    uint32_t old_value;
+    do {
+        old_value = __wt_atomic_load32(valuep);
+        if (old_value == 0)
+            break;
+    } while (!__wt_atomic_cas32(valuep, old_value, old_value - 1));
+}

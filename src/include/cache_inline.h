@@ -85,6 +85,16 @@ __wt_cache_bytes_updates(WT_CACHE *cache)
 }
 
 /*
+ * __wt_cache_bytes_delta_updates --
+ *     Return the number of bytes in use for delta updates.
+ */
+static WT_INLINE uint64_t
+__wt_cache_bytes_delta_updates(WT_CACHE *cache)
+{
+    return (__wt_cache_bytes_plus_overhead(cache, __wt_atomic_load64(&cache->bytes_delta_updates)));
+}
+
+/*
  * __wt_cache_bytes_image --
  *     Return the number of page image bytes in use.
  */
@@ -131,8 +141,8 @@ __wt_session_can_wait(WT_SESSION_IMPL *session)
         return (false);
 
     /*
-     * LSM sets the "ignore cache size" flag when holding the LSM tree lock, in that case, or when
-     * holding the schema lock, we don't want this thread to block for eviction.
+     * Don't block to perform slow operations for sessions that set the "ignore cache size" flag, or
+     * when holding the schema lock.
      */
     return (!(F_ISSET(session, WT_SESSION_IGNORE_CACHE_SIZE) ||
       FLD_ISSET(session->lock_flags, WT_SESSION_LOCKED_SCHEMA)));

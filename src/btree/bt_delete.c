@@ -211,6 +211,8 @@ __wti_delete_page(WT_SESSION_IMPL *session, WT_REF *ref, bool *skipp)
     *skipp = true;
     WT_STAT_CONN_DSRC_INCR(session, rec_page_delete_fast);
 
+    __wt_atomic_addv16(&ref->ref_changes, 1);
+
     /* Set the page to its new state. */
     WT_REF_SET_STATE(ref, WT_REF_DELETED);
     return (0);
@@ -231,9 +233,12 @@ int
 __wt_delete_page_rollback(WT_SESSION_IMPL *session, WT_REF *ref)
 {
     WT_REF_STATE current_state;
+    WT_TXN *txn;
     WT_UPDATE **updp;
     uint64_t sleep_usecs, yield_count;
     bool locked;
+
+    txn = session->txn;
 
     /* Lock the reference. We cannot access ref->page_del except when locked. */
     for (locked = false, sleep_usecs = yield_count = 0;;) {
@@ -278,6 +283,12 @@ __wt_delete_page_rollback(WT_SESSION_IMPL *session, WT_REF *ref)
          * the reverse operation is to return the state to WT_REF_DISK.
          */
         current_state = WT_REF_DISK;
+
+        /*
+         * TODO: handle prepared rollback here. We can no longer free the page del structure if it
+         * is a prepared transaction.
+         */
+
         /*
          * Don't set the WT_PAGE_DELETED transaction ID to aborted; instead, just discard the
          * structure. This avoids having to check for an aborted delete in other situations.
@@ -293,8 +304,14 @@ __wt_delete_page_rollback(WT_SESSION_IMPL *session, WT_REF *ref)
              * the reference to the tree required for a hazard pointer. We're safe since pages with
              * unresolved transactions aren't going anywhere.
              */
-            for (; *updp != NULL; ++updp)
+            for (; *updp != NULL; ++updp) {
+                /* The ref is locked, no need to pay attention to memory ordering here. */
+                if (F_ISSET(txn, WT_TXN_HAS_TS_ROLLBACK)) {
+                    (*updp)->upd_rollback_ts = txn->rollback_timestamp;
+                    (*updp)->upd_saved_txnid = (*updp)->txnid;
+                }
                 (*updp)->txnid = WT_TXN_ABORTED;
+            }
             /* Now discard the updates. */
             __wt_free(session, ref->page->modify->inst_updates);
         }
@@ -308,6 +325,8 @@ __wt_delete_page_rollback(WT_SESSION_IMPL *session, WT_REF *ref)
             __wt_free(session, ref->page_del);
         }
     }
+
+    __wt_atomic_addv16(&ref->ref_changes, 1);
 
     WT_REF_SET_STATE(ref, current_state);
     return (0);
@@ -455,8 +474,8 @@ __tombstone_update_alloc(
      */
     if (page_del != NULL) {
         upd->txnid = page_del->txnid;
-        upd->durable_ts = page_del->durable_timestamp;
-        upd->start_ts = page_del->timestamp;
+        upd->upd_durable_ts = page_del->pg_del_durable_ts;
+        upd->upd_start_ts = page_del->pg_del_start_ts;
         upd->prepare_state = page_del->prepare_state;
     }
     *updp = upd;
@@ -473,11 +492,8 @@ __instantiate_tombstone(WT_SESSION_IMPL *session, WT_PAGE_DELETED *page_del,
   size_t *sizep)
 {
     /*
-     * If we find an existing stop time point we don't need to append a tombstone. Such rows would
-     * not have been visible to the original truncate operation and were, logically, skipped over
-     * rather than re-deleted. (If the row _was_ visible to the truncate in spite of having been
-     * subsequently removed, the stop time not being visible would have forced its page to be slow-
-     * truncated rather than fast-truncated.)
+     * If we find an existing stop time point we don't need to append a tombstone. We have restored
+     * it already when we read the disk page into memory.
      */
     if (WT_TIME_WINDOW_HAS_STOP(tw))
         *updp = NULL;
@@ -486,6 +502,7 @@ __instantiate_tombstone(WT_SESSION_IMPL *session, WT_PAGE_DELETED *page_del,
 
         if (update_list != NULL)
             update_list[(*countp)++] = *updp;
+        WT_STAT_CONN_DSRC_INCRV(session, cache_read_restored_tombstone_bytes, *sizep);
     }
 
     return (0);
@@ -505,6 +522,7 @@ __instantiate_col_var(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE_DELETED *pa
     WT_DECL_RET;
     WT_PAGE *page;
     WT_UPDATE *upd;
+    size_t size;
     uint64_t j, recno, rle;
     uint32_t i;
 
@@ -540,7 +558,7 @@ __instantiate_col_var(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE_DELETED *pa
         /* Delete each key. */
         for (j = 0; j < rle; j++) {
             WT_ERR(__instantiate_tombstone(
-              session, page_del, update_list, countp, &unpack.tw, &upd, NULL));
+              session, page_del, update_list, countp, &unpack.tw, &upd, &size));
             if (upd != NULL) {
                 /* Position the cursor on the page. */
                 WT_ERR(__wt_col_search(&cbt, recno + j, ref, true /*leaf_safe*/, NULL));
@@ -614,7 +632,7 @@ __instantiate_row(WT_SESSION_IMPL *session, WT_REF *ref, WT_PAGE_DELETED *page_d
         WT_ASSERT(session, WT_ROW_INSERT(page, rip) == NULL);
     }
 
-    __wt_cache_page_inmem_incr(session, page, total_size);
+    __wt_cache_page_inmem_incr(session, page, total_size, false);
 
     /*
      * Note that the label is required by the alloc-and-swap macro. There isn't anything we need to

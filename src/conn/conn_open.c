@@ -47,18 +47,18 @@ __wti_connection_open(WT_CONNECTION_IMPL *conn, const char *cfg[])
     WT_RELEASE_BARRIER();
 
     /* Create the cache. */
-    WT_RET(__wti_cache_create(session, cfg));
+    WT_RET(__wt_cache_create(session, cfg));
 
     /* Initialize eviction. */
     WT_RET(__wt_evict_create(session, cfg));
 
     /* Create shared cache.*/
-    WT_RET(__wti_conn_cache_pool_create(session, cfg));
+    WT_RET(__wt_cache_pool_create(session, cfg));
 
     /* Initialize transaction support. */
     WT_RET(__wt_txn_global_init(session, cfg));
 
-    __wt_rollback_to_stable_init(conn);
+    WT_RET(__wt_rollback_to_stable_init(session, cfg));
     WT_STAT_CONN_SET(session, dh_conn_handle_size, sizeof(WT_DATA_HANDLE));
     return (0);
 }
@@ -79,12 +79,6 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
     wt_conn = &conn->iface;
     session = conn->default_session;
 
-    /*
-     * The LSM services are not shut down in this path (which is called when wiredtiger_open hits an
-     * error (as well as during normal shutdown). Assert they're not running.
-     */
-    WT_ASSERT(session, !FLD_ISSET(conn->server_flags, WT_CONN_SERVER_LSM));
-
     /* Shut down the subsystems, ensuring workers see the state change. */
     F_SET(conn, WT_CONN_CLOSING);
     WT_FULL_BARRIER();
@@ -92,12 +86,16 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
     /* The default session is used to access data handles during close. */
     F_CLR(session, WT_SESSION_NO_DATA_HANDLES);
 
+    /* Shut down the page history tracker. */
+    WT_TRET(__wti_conn_page_history_destroy(session));
+
     /*
      * Shut down server threads. Some of these threads access btree handles and eviction, shut them
      * down before the eviction server, and shut all servers down before closing open data handles.
      */
+    WT_TRET(__wt_live_restore_server_destroy(session));
     WT_TRET(__wti_background_compact_server_destroy(session));
-    WT_TRET(__wti_checkpoint_server_destroy(session));
+    WT_TRET(__wt_checkpoint_server_destroy(session));
     WT_TRET(__wti_statlog_destroy(session, true));
     WT_TRET(__wti_tiered_storage_destroy(session, false));
     WT_TRET(__wti_sweep_destroy(session));
@@ -123,6 +121,9 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
     /* Shut down the block cache */
     __wt_blkcache_destroy(session);
 
+    /* Shut down layered table manager - this should be done after closing out data handles. */
+    WT_TRET(__wti_layered_table_manager_destroy(session));
+
     /*
      * Now that all data handles are closed, tell logging that a checkpoint has completed then shut
      * down the log manager (only after closing data handles). The call to destroy the log manager
@@ -131,25 +132,28 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
      */
     if (ret == 0 && F_ISSET(&conn->log_mgr, WT_LOG_ENABLED) &&
       F_ISSET(&conn->log_mgr, WT_LOG_RECOVER_DONE))
-        WT_TRET(__wt_txn_checkpoint_log(session, true, WT_TXN_LOG_CKPT_STOP, NULL));
+        WT_TRET(__wt_checkpoint_log(session, true, WT_TXN_LOG_CKPT_STOP, NULL));
     WT_TRET(__wt_logmgr_destroy(session));
+
+    /* Shut down disaggregated storage. */
+    WT_TRET(__wti_disagg_destroy(session));
 
     /* Free memory for collators, compressors, data sources. */
     WT_TRET(__wti_conn_remove_collator(session));
     WT_TRET(__wti_conn_remove_compressor(session));
     WT_TRET(__wti_conn_remove_data_source(session));
     WT_TRET(__wti_conn_remove_encryptor(session));
-    WT_TRET(__wti_conn_remove_extractor(session));
+    WT_TRET(__wti_conn_remove_page_log(session));
     WT_TRET(__wti_conn_remove_storage_source(session));
 
     /* Disconnect from shared cache - must be before cache destroy. */
-    WT_TRET(__wti_conn_cache_pool_destroy(session));
+    WT_TRET(__wt_cache_pool_destroy(session));
 
     /* Destroy Eviction. */
     WT_TRET(__wt_evict_destroy(session));
 
     /* Discard the cache. */
-    WT_TRET(__wti_cache_destroy(session));
+    WT_TRET(__wt_cache_destroy(session));
 
     /* Discard transaction state. */
     __wt_txn_global_destroy(session);
@@ -225,6 +229,8 @@ __wti_connection_close(WT_CONNECTION_IMPL *conn)
 int
 __wti_connection_workers(WT_SESSION_IMPL *session, const char *cfg[])
 {
+    WT_CONFIG_ITEM cval;
+
     __wt_verbose_info(session, WT_VERB_RECOVERY, "%s", "starting WiredTiger utility threads");
 
     /*
@@ -235,15 +241,39 @@ __wti_connection_workers(WT_SESSION_IMPL *session, const char *cfg[])
     WT_RET(__wti_tiered_storage_create(session));
     WT_RET(__wt_logmgr_create(session));
 
+    /* Initialize the page history tracker. */
+    WT_RET(__wti_conn_page_history_config(session, cfg, false));
+
     /*
      * Run recovery. NOTE: This call will start (and stop) eviction if recovery is required.
      * Recovery must run before the history store table is created (because recovery will update the
      * metadata, and set the maximum file id seen), and before eviction is started for real.
+     *
+     * FIXME-WT-14721: the disagg config check is a giant hack. Ideally, we'd have a single
+     * top-level disagg config item that can be checked, and set a variable elsewhere so we could
+     * gate this on a call like __wt_conn_is_disagg.
+     *
+     * As it stands, __wt_conn_is_disagg only works after we have metadata access, which depends on
+     * having run recovery, so the config hack is the simplest way to break that dependency.
      */
-    WT_RET(__wt_txn_recover(session, cfg));
+    WT_RET(__wt_config_gets(session, cfg, "disaggregated.page_log", &cval));
+    WT_RET(__wt_txn_recover(session, cfg, cval.len != 0));
+
+    /*
+     * If we're performing a live restore start the server. This is intentionally placed after
+     * recovery finishes as we depend on the metadata file containing the list of objects that need
+     * live restoration.
+     */
+    WT_RET(__wt_live_restore_server_create(session, cfg));
 
     /* Initialize metadata tracking, required before creating tables. */
-    WT_RET(__wt_meta_track_init(session));
+    WT_RET(__wt_meta_track_init(session)); /* XXXXXX */
+
+    /*
+     * Initialize disaggregated storage. It technically doesn't belong here, but it must be
+     * initialized after metadata tracking and before the history store.
+     */
+    WT_RET(__wti_disagg_conn_config(session, cfg, false));
 
     /* Can create a table, so must be done after metadata tracking. */
     WT_RET(__wt_chunkcache_setup(session, cfg));
@@ -278,7 +308,7 @@ __wti_connection_workers(WT_SESSION_IMPL *session, const char *cfg[])
     WT_RET(__wti_capacity_server_create(session, cfg));
 
     /* Start the optional checkpoint thread. */
-    WT_RET(__wti_checkpoint_server_create(session, cfg));
+    WT_RET(__wt_checkpoint_server_create(session, cfg));
 
     /* Start pre-fetch utilities. */
     WT_RET(__wti_prefetch_create(session, cfg));

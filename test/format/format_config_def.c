@@ -13,11 +13,20 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
 
   {"backup", "configure backups", C_BOOL, 20, 0, 0, V_GLOBAL_BACKUP},
 
-  {"backup.incremental", "backup type (off | block | log)", C_IGNORE | C_STRING, 0, 0, 0,
+  {"backup.incremental", "backup type (off | block)", C_IGNORE | C_STRING, 0, 0, 0,
     V_GLOBAL_BACKUP_INCREMENTAL},
 
   {"backup.incr_granularity", "incremental backup block granularity (KB)", 0x0, 4, 16384, 16384,
     V_GLOBAL_BACKUP_INCR_GRANULARITY},
+
+  {"backup.live_restore", "configure backup live restore recovery", C_BOOL, 25, 0, 0,
+    V_GLOBAL_BACKUP_LIVE_RESTORE},
+
+  {"backup.live_restore_read_size", "live restore read size (KB power of 2)", C_POW2, 1, 16384,
+    16384, V_GLOBAL_BACKUP_LIVE_RESTORE_READ_SIZE},
+
+  {"backup.live_restore_threads", "number of live restore worker threads", 0x0, 0, 12, 12,
+    V_GLOBAL_BACKUP_LIVE_RESTORE_THREADS},
 
   {"block_cache", "enable the block cache", C_BOOL, 10, 0, 0, V_GLOBAL_BLOCK_CACHE},
 
@@ -80,9 +89,6 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
   {"btree.value_min", "minimum value size", C_TABLE | C_TYPE_ROW | C_TYPE_VAR, 0, 20, 4096,
     V_TABLE_BTREE_VALUE_MIN},
 
-  {"buffer_alignment", "buffer alignment (off | on), on configures to 512", C_BOOL, 5, 0, 0,
-    V_GLOBAL_BUFFER_ALIGNMENT},
-
   {"cache", "cache size (MB)", 0x0, 1, 100, 100 * 1024, V_GLOBAL_CACHE},
 
   {"cache.evict_max", "maximum number of eviction workers", 0x0, 0, 5, 100,
@@ -94,12 +100,20 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
   {"cache.eviction_dirty_trigger", "dirty content trigger for eviction", C_IGNORE, 0, 0, 100,
     V_GLOBAL_CACHE_EVICTION_DIRTY_TRIGGER},
 
+  {"cache.eviction_updates_target", "update content target for eviction", C_IGNORE, 0, 0, 100,
+    V_GLOBAL_CACHE_EVICTION_UPDATES_TARGET},
+
+  {"cache.eviction_updates_trigger", "update content trigger for eviction", C_IGNORE, 0, 0, 100,
+    V_GLOBAL_CACHE_EVICTION_UPDATES_TRIGGER},
+
   {"cache.minimum", "minimum cache size (MB)", C_IGNORE, 0, 0, 100 * 1024, V_GLOBAL_CACHE_MINIMUM},
 
   {"cache.maximum", "maximum cache size (MB)", C_IGNORE, 0, 0, UINT_MAX, V_GLOBAL_CACHE_MAXIMUM},
 
   {"checkpoint", "checkpoint type (on | off | wiredtiger)", C_IGNORE | C_STRING, 0, 0, 0,
     V_GLOBAL_CHECKPOINT},
+
+  {"checkpoint.precise", "Precise checkpoint", C_BOOL, 50, 0, 0, V_GLOBAL_CHECKPOINT_PRECISE},
 
   {"checkpoint.log_size", "MB of log to wait if wiredtiger checkpoints configured", 0x0, 20, 200,
     1024, V_GLOBAL_CHECKPOINT_LOG_SIZE},
@@ -159,13 +173,22 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
     "control all dirty page evictions through forcing update restore eviction", C_BOOL, 2, 0, 0,
     V_GLOBAL_DEBUG_UPDATE_RESTORE_EVICT},
 
+  {"disagg.page_log", "configure page log for disaggregated storage (off | palm)",
+    C_IGNORE | C_STRING, 0, 0, 0, V_GLOBAL_DISAGG_PAGE_LOG},
+
+  {"disagg.mode", "configure mode for disaggregated storage (leader | follower)",
+    C_IGNORE | C_STRING, 0, 0, 0, V_GLOBAL_DISAGG_MODE},
+
+  {"disagg.enabled", "configure disaggregated storage", C_IGNORE | C_BOOL | C_TABLE | C_TYPE_ROW, 0,
+    0, 0, V_TABLE_DISAGG_ENABLED},
+
+  {"disagg.layered", "use layered URI for any disaggregated tables", C_BOOL, 100, 1, 0,
+    V_GLOBAL_DISAGG_LAYERED},
+
   {"disk.checksum", "checksum type (on | off | uncompressed | unencrypted)",
     C_IGNORE | C_STRING | C_TABLE, 0, 0, 0, V_TABLE_DISK_CHECKSUM},
 
   {"disk.data_extend", "configure data file extension", C_BOOL, 5, 0, 0, V_GLOBAL_DISK_DATA_EXTEND},
-
-  {"disk.direct_io", "configure direct I/O for data objects", C_BOOL | C_IGNORE, 0, 0, 1,
-    V_GLOBAL_DISK_DIRECT_IO},
 
   {"disk.encryption", "encryption type (off | rotn-7)", C_IGNORE | C_STRING, 0, 0, 0,
     V_GLOBAL_DISK_ENCRYPTION},
@@ -177,6 +200,9 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
 
   {"disk.mmap_all", "configure mmap operations (read and write)", C_BOOL, 5, 0, 0,
     V_GLOBAL_DISK_MMAP_ALL},
+
+  {"eviction.evict_use_softptr", "use soft pointers instead of hard hazard pointers in eviction",
+    C_BOOL, 20, 0, 0, V_GLOBAL_EVICTION_EVICT_USE_SOFTPTR},
 
   /* Test format can only handle 32 tables so we use a maximum value of 32 here. */
   {"file_manager.close_handle_minimum",
@@ -220,29 +246,11 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
 
   {"logging.remove", "configure log file removal", C_BOOL, 50, 0, 0, V_GLOBAL_LOGGING_REMOVE},
 
-  {"lsm.auto_throttle", "throttle LSM inserts", C_BOOL | C_TABLE | C_TYPE_LSM, 90, 0, 0,
-    V_TABLE_LSM_AUTO_THROTTLE},
+  {"obsolete_cleanup.method", "obsolete cleanup strategy", C_IGNORE | C_STRING, 0, 0, 0,
+    V_GLOBAL_OBSOLETE_CLEANUP_METHOD},
 
-  {"lsm.bloom", "configure bloom filters", C_BOOL | C_TABLE | C_TYPE_LSM, 95, 0, 0,
-    V_TABLE_LSM_BLOOM},
-
-  {"lsm.bloom_bit_count", "number of bits per item for bloom filters", C_TABLE | C_TYPE_LSM, 4, 64,
-    WT_THOUSAND, V_TABLE_LSM_BLOOM_BIT_COUNT},
-
-  {"lsm.bloom_hash_count", "number of hash values per item for bloom filters", C_TABLE | C_TYPE_LSM,
-    4, 32, 100, V_TABLE_LSM_BLOOM_HASH_COUNT},
-
-  {"lsm.bloom_oldest", "configure bloom_oldest=true", C_BOOL | C_TABLE | C_TYPE_LSM, 10, 0, 0,
-    V_TABLE_LSM_BLOOM_OLDEST},
-
-  {"lsm.chunk_size", "LSM chunk size (MB)", C_TABLE | C_TYPE_LSM, 1, 10, 100,
-    V_TABLE_LSM_CHUNK_SIZE},
-
-  {"lsm.merge_max", "maximum number of chunks to include in an LSM merge operation",
-    C_TABLE | C_TYPE_LSM, 4, 20, 100, V_TABLE_LSM_MERGE_MAX},
-
-  {"lsm.worker_threads", "number of LSM worker threads", C_TYPE_LSM, 3, 4, 20,
-    V_GLOBAL_LSM_WORKER_THREADS},
+  {"obsolete_cleanup.wait", "obsolete cleanup interval in seconds", 0x0, 1, 3600, 100000,
+    V_GLOBAL_OBSOLETE_CLEANUP_WAIT},
 
   {"ops.alter", "configure table alterations", C_BOOL, 10, 0, 0, V_GLOBAL_OPS_ALTER},
 
@@ -311,8 +319,8 @@ CONFIG configuration_list[] = {{"assert.read_timestamp", "assert read_timestamp"
 
   {"runs.rows", "number of rows", C_TABLE, 10, M(1), M(100), V_TABLE_RUNS_ROWS},
 
-  {"runs.source", "data source type (file | lsm | table)", C_IGNORE | C_STRING | C_TABLE, 0, 0, 0,
-    V_TABLE_RUNS_SOURCE},
+  {"runs.source", "data source type (file | layered | table)", C_IGNORE | C_STRING | C_TABLE, 0, 0,
+    0, V_TABLE_RUNS_SOURCE},
 
   {"runs.tables", "number of tables", 0x0, 1, 32, V_MAX_TABLES_CONFIG, V_GLOBAL_RUNS_TABLES},
 

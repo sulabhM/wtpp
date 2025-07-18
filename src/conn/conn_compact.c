@@ -383,12 +383,10 @@ __wt_background_compact_end(WT_SESSION_IMPL *session)
      * compaction to do work (rewriting bytes) while other operations cause the file to increase in
      * size.
      */
-    if (bytes_recovered <= 0) {
-        compact_stat->consecutive_unsuccessful_attempts++;
+    if (bytes_recovered <= 0)
         compact_stat->prev_compact_success = false;
-    } else {
+    else {
         WT_STAT_CONN_INCRV(session, background_compact_bytes_recovered, bytes_recovered);
-        compact_stat->consecutive_unsuccessful_attempts = 0;
         conn->background_compact.files_compacted++;
         compact_stat->prev_compact_success = true;
 
@@ -403,6 +401,10 @@ __wt_background_compact_end(WT_SESSION_IMPL *session)
         WT_STAT_CONN_SET(
           session, background_compact_ema, conn->background_compact.bytes_rewritten_ema);
     }
+
+    __wt_verbose_info(session, WT_VERB_COMPACT_PROGRESS,
+      "%s: background compaction finished (status: %s) - reclaimed %" PRIu64 " bytes", uri,
+      (compact_stat->prev_compact_success ? "success" : "failure"), (uint64_t)bytes_recovered);
 
     return (0);
 }
@@ -806,10 +808,8 @@ __wt_background_compact_signal(WT_SESSION_IMPL *session, const char *config)
 
     /* Wait for any previous signal to be processed first. */
     __wt_spin_lock(session, &conn->background_compact.lock);
-    if (conn->background_compact.signalled) {
-        ret = EBUSY;
-        goto err;
-    }
+    if (conn->background_compact.signalled)
+        WT_ERR_MSG(session, EBUSY, "Background compact is busy processing a previous command");
 
     running = __wt_atomic_loadbool(&conn->background_compact.running);
 
@@ -821,8 +821,8 @@ __wt_background_compact_signal(WT_SESSION_IMPL *session, const char *config)
 
     /* The background compact configuration cannot be changed while it's already running. */
     if (enable && running && strcmp(stripped_config, conn->background_compact.config) != 0)
-        WT_ERR_MSG(
-          session, EINVAL, "Cannot reconfigure background compaction while it's already running.");
+        WT_ERR_SUB(session, EINVAL, WT_BACKGROUND_COMPACT_ALREADY_RUNNING,
+          "Cannot reconfigure background compaction while it's already running.");
 
     /* If we haven't changed states, we're done. */
     if (enable == running)

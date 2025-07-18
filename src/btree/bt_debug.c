@@ -270,8 +270,10 @@ __debug_config(WT_SESSION_IMPL *session, WT_DBG *ds, const char *ofile, uint32_t
      * checkpoint.
      */
     if (!F_ISSET(conn, WT_CONN_IN_MEMORY) && !WT_IS_HS(session->dhandle) &&
-      !(WT_READING_CHECKPOINT(session) && session->hs_checkpoint == NULL))
-        WT_ERR(__wt_curhs_open(session, NULL, &ds->hs_cursor));
+      !(WT_READING_CHECKPOINT(session) && session->hs_checkpoint == NULL)) {
+        WT_ASSERT(session, session->dhandle != NULL);
+        WT_ERR(__wt_curhs_open(session, S2BT(session)->id, NULL, &ds->hs_cursor));
+    }
 
     if (ds->hs_cursor != NULL) {
         /*
@@ -383,7 +385,7 @@ __wt_debug_addr(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr_size,
     WT_DECL_RET;
 
     WT_RET(__wt_scr_alloc(session, 1024, &buf));
-    WT_ERR(__wt_blkcache_read(session, buf, addr, addr_size));
+    WT_ERR(__wt_blkcache_read(session, buf, NULL, addr, addr_size));
     ret = __wti_debug_disk(session, buf->mem, ofile, false, false);
 
 err:
@@ -444,7 +446,7 @@ __wt_debug_offset(WT_SESSION_IMPL *session, wt_off_t offset, uint32_t size, uint
      * unencrypted as necessary).
      */
     WT_RET(__wt_scr_alloc(session, 0, &buf));
-    WT_ERR(__wt_blkcache_read(session, buf, addr, WT_PTRDIFF(endp, addr)));
+    WT_ERR(__wt_blkcache_read(session, buf, NULL, addr, WT_PTRDIFF(endp, addr)));
     ret = __wti_debug_disk(session, buf->mem, ofile, dump_all_data, dump_key_data);
 
 err:
@@ -567,8 +569,8 @@ __debug_cell_int(WT_DBG *ds, const WT_PAGE_HEADER *dsk, WT_CELL_UNPACK_ADDR *unp
         if (F_ISSET(dsk, WT_PAGE_FT_UPDATE)) {
             page_del = &unpack->page_del;
             WT_RET(ds->f(ds, " | page_del : %s",
-              __wt_time_point_to_string(
-                page_del->timestamp, page_del->durable_timestamp, page_del->txnid, time_string)));
+              __wt_time_point_to_string(page_del->pg_del_start_ts, page_del->pg_del_durable_ts,
+                page_del->txnid, time_string)));
         }
     /* FALLTHROUGH */
     case WT_CELL_ADDR_INT:
@@ -693,7 +695,7 @@ __debug_cell_kv(
     if (unpack->raw == WT_CELL_DEL)
         return (0);
 
-    WT_RET(page == NULL ? __wt_dsk_cell_data_ref_kv(session, page_type, unpack, ds->t1) :
+    WT_RET(page == NULL ? __wt_dsk_cell_data_ref_kv(session, unpack, ds->t1) :
                           __wt_page_cell_data_ref_kv(session, page, unpack, ds->t1));
 
     /* Standard key/value cells. */
@@ -1097,14 +1099,22 @@ __wt_debug_cursor_tree_hs(void *cursor_arg, const char *ofile)
     WT_CURSOR *hs_cursor;
     WT_DECL_RET;
     WT_SESSION_IMPL *session;
+    uint32_t hs_id;
 
     session = CUR2S(cursor_arg);
-    WT_RET(__wt_curhs_open(session, NULL, &hs_cursor));
-    hs_btree = __wt_curhs_get_btree(hs_cursor);
-    WT_WITH_BTREE(session, hs_btree, ret = __wt_debug_tree_all(session, NULL, NULL, ofile));
-    WT_TRET(hs_cursor->close(hs_cursor));
 
-    return (ret);
+    hs_id = 0;
+    for (;;) {
+        WT_RET_NOTFOUND_OK(ret = __wt_curhs_next_hs_id(session, hs_id, &hs_id));
+        if (ret == WT_NOTFOUND)
+            return (0);
+
+        WT_RET(__wt_curhs_open_ext(session, hs_id, 0, NULL, &hs_cursor));
+        hs_btree = __wt_curhs_get_btree(hs_cursor);
+        WT_WITH_BTREE(session, hs_btree, ret = __wt_debug_tree_all(session, NULL, NULL, ofile));
+        WT_TRET(hs_cursor->close(hs_cursor));
+        WT_RET(ret);
+    }
 }
 
 /*
@@ -1657,10 +1667,10 @@ __debug_update(WT_DBG *ds, WT_UPDATE *upd, bool hexbyte)
               "txn_id %" PRIu64,
               upd->txnid));
 
-        WT_RET(ds->f(ds, ", start_ts %s", __wt_timestamp_to_string(upd->start_ts, ts_string)));
-        if (upd->durable_ts != WT_TS_NONE)
-            WT_RET(
-              ds->f(ds, ", durable_ts %s", __wt_timestamp_to_string(upd->durable_ts, ts_string)));
+        WT_RET(ds->f(ds, ", start_ts %s", __wt_timestamp_to_string(upd->upd_start_ts, ts_string)));
+        if (upd->upd_durable_ts != WT_TS_NONE)
+            WT_RET(ds->f(
+              ds, ", durable_ts %s", __wt_timestamp_to_string(upd->upd_durable_ts, ts_string)));
 
         prepare_state = NULL;
         switch (upd->prepare_state) {
@@ -1679,7 +1689,7 @@ __debug_update(WT_DBG *ds, WT_UPDATE *upd, bool hexbyte)
         if (prepare_state != NULL)
             WT_RET(ds->f(ds, ", prepare: %s", prepare_state));
 
-        WT_RET(ds->f(ds, ", flags: 0x%" PRIx8 "\n", upd->flags));
+        WT_RET(ds->f(ds, ", flags: 0x%" PRIx16 "\n", upd->flags));
     }
     return (0);
 }
@@ -1749,7 +1759,7 @@ __debug_ref(WT_DBG *ds, WT_REF *ref)
         page_del = ref->page_del;
         WT_RET(ds->f(ds, " | page_del: %s",
           __wt_time_point_to_string(
-            page_del->timestamp, page_del->durable_timestamp, page_del->txnid, time_string)));
+            page_del->pg_del_start_ts, page_del->pg_del_durable_ts, page_del->txnid, time_string)));
     }
     return (ds->f(ds, "\n"));
 }

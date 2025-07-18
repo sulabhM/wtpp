@@ -213,7 +213,7 @@ __txn_logrec_init(WT_SESSION_IMPL *session)
     rectype = WT_LOGREC_COMMIT;
     fmt = WT_UNCHECKED_STRING(Iq);
 
-    if (txn->logrec != NULL) {
+    if (txn->txn_log.logrec != NULL) {
         WT_ASSERT(session, F_ISSET(txn, WT_TXN_HAS_ID));
         return (0);
     }
@@ -233,7 +233,7 @@ __txn_logrec_init(WT_SESSION_IMPL *session)
     WT_ERR(__wt_struct_pack(
       session, (uint8_t *)logrec->data + logrec->size, header_size, fmt, rectype, txn->id));
     logrec->size += (uint32_t)header_size;
-    txn->logrec = logrec;
+    txn->txn_log.logrec = logrec;
 
     if (0) {
 err:
@@ -275,7 +275,7 @@ __wt_txn_log_op(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt)
         FLD_SET(fileid, WT_LOGOP_IGNORE);
 
     WT_RET(__txn_logrec_init(session));
-    logrec = txn->logrec;
+    logrec = txn->txn_log.logrec;
 
     switch (op->type) {
     case WT_TXN_OP_NONE:
@@ -305,20 +305,19 @@ __wt_txn_log_op(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt)
  *     Write the operations of a transaction to the log at commit time.
  */
 int
-__wti_txn_log_commit(WT_SESSION_IMPL *session, const char *cfg[])
+__wti_txn_log_commit(WT_SESSION_IMPL *session)
 {
     WT_TXN *txn;
 
-    WT_UNUSED(cfg);
     txn = session->txn;
     /*
      * If there are no log records there is nothing to do.
      */
-    if (txn->logrec == NULL)
+    if (txn->txn_log.logrec == NULL)
         return (0);
 
     /* Write updates to the log. */
-    return (__wt_log_write(session, txn->logrec, NULL, txn->txn_logsync));
+    return (__wt_log_write(session, txn->txn_log.logrec, NULL, txn->txn_log.txn_logsync));
 }
 
 /*
@@ -407,7 +406,7 @@ __wti_txn_ts_log(WT_SESSION_IMPL *session)
         return (0);
 
     WT_RET(__txn_logrec_init(session));
-    logrec = txn->logrec;
+    logrec = txn->txn_log.logrec;
     commit = durable = first_commit = prepare = read = WT_TS_NONE;
     if (F_ISSET(txn, WT_TXN_HAS_TS_COMMIT)) {
         commit = txn->commit_timestamp;
@@ -426,11 +425,11 @@ __wti_txn_ts_log(WT_SESSION_IMPL *session)
 }
 
 /*
- * __wt_txn_checkpoint_log --
+ * __wt_checkpoint_log --
  *     Write a log record for a checkpoint operation.
  */
 int
-__wt_txn_checkpoint_log(WT_SESSION_IMPL *session, bool full, uint32_t flags, WT_LSN *lsnp)
+__wt_checkpoint_log(WT_SESSION_IMPL *session, bool full, uint32_t flags, WT_LSN *lsnp)
 {
     WT_CONNECTION_IMPL *conn;
     WT_DECL_ITEM(logrec);
@@ -563,6 +562,9 @@ __wt_txn_checkpoint_log(WT_SESSION_IMPL *session, bool full, uint32_t flags, WT_
     }
 
 err:
+#ifdef HAVE_DIAGNOSTIC
+    WT_CONN_CLOSE_ABORT(session, ret);
+#endif
     __wt_logrec_free(session, &logrec);
     return (ret);
 }
@@ -662,7 +664,6 @@ static int
 __txn_printlog(WT_SESSION_IMPL *session, WT_ITEM *rawrec, WT_LSN *lsnp, WT_LSN *next_lsnp,
   void *cookie, int firstrecord)
 {
-    WT_DECL_ITEM(lsn_str);
     WT_DECL_RET;
     WT_LOG_RECORD *logrec;
     WT_TXN_PRINTLOG_ARGS *args;
@@ -670,6 +671,7 @@ __txn_printlog(WT_SESSION_IMPL *session, WT_ITEM *rawrec, WT_LSN *lsnp, WT_LSN *
     uint32_t fileid, lsnfile, lsnoffset, rectype;
     int32_t start;
     const uint8_t *end, *p;
+    char lsn_str[WT_MAX_LSN_STRING];
     const char *msg;
     bool compressed;
 
@@ -698,9 +700,8 @@ __txn_printlog(WT_SESSION_IMPL *session, WT_ITEM *rawrec, WT_LSN *lsnp, WT_LSN *
     if (!firstrecord)
         WT_RET(__wt_fprintf(session, args->fs, ",\n"));
 
-    WT_ERR(__wt_scr_alloc(session, 0, &lsn_str));
-    WT_ERR(__wt_lsn_string(session, lsnp, lsn_str));
-    WT_ERR(__wt_fprintf(session, args->fs, "  { \"lsn\" : [%s],\n", (char *)lsn_str->mem));
+    WT_ERR(__wt_lsn_string(lsnp, sizeof(lsn_str), lsn_str));
+    WT_ERR(__wt_fprintf(session, args->fs, "  { \"lsn\" : [%s],\n", lsn_str));
     WT_ERR(__wt_fprintf(
       session, args->fs, "    \"hdr_flags\" : \"%s\",\n", compressed ? "compressed" : ""));
     WT_ERR(__wt_fprintf(session, args->fs, "    \"rec_len\" : %" PRIu32 ",\n", logrec->len));
@@ -748,7 +749,6 @@ __txn_printlog(WT_SESSION_IMPL *session, WT_ITEM *rawrec, WT_LSN *lsnp, WT_LSN *
     WT_ERR(__wt_fprintf(session, args->fs, "  }"));
 
 err:
-    __wt_scr_free(session, &lsn_str);
     return (ret);
 }
 

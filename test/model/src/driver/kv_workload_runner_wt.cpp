@@ -156,7 +156,8 @@ kv_workload_runner_wt::run(const kv_workload &workload)
                 /* Run (or resume) the workload. */
                 for (; p < workload.size(); p++) {
                     const kv_workload_operation &op = workload[p];
-                    if (std::holds_alternative<operation::crash>(op.operation)) {
+                    if (std::holds_alternative<operation::crash>(op.operation) ||
+                      std::holds_alternative<operation::checkpoint_crash>(op.operation)) {
                         _state->expect_crash = true;
                         _state->crash_index = p;
                     }
@@ -309,6 +310,28 @@ kv_workload_runner_wt::do_operation(const operation::checkpoint &op)
  *     Execute the given workload operation in WiredTiger.
  */
 int
+kv_workload_runner_wt::do_operation(const operation::checkpoint_crash &op)
+{
+    std::shared_lock lock(_connection_lock);
+
+    WT_SESSION *session;
+    int ret = _connection->open_session(_connection, nullptr, nullptr, &session);
+    if (ret != 0)
+        return ret;
+    wiredtiger_session_guard session_guard(session);
+
+    std::ostringstream config;
+    config << "debug=(checkpoint_crash_point=" << op.crash_step << ")";
+    std::string config_str = config.str();
+
+    return session->checkpoint(session, config_str.c_str());
+}
+
+/*
+ * kv_workload_runner_wt::do_operation --
+ *     Execute the given workload operation in WiredTiger.
+ */
+int
 kv_workload_runner_wt::do_operation(const operation::commit_transaction &op)
 {
     std::ostringstream config;
@@ -396,6 +419,24 @@ kv_workload_runner_wt::do_operation(const operation::evict &op)
 {
     std::shared_lock lock(_connection_lock);
     wt_evict(_connection, table_uri(op.table_id), op.key);
+    return 0;
+}
+
+/*
+ * kv_workload_runner_wt::do_operation --
+ *     Execute the given workload operation in WiredTiger.
+ */
+int
+kv_workload_runner_wt::do_operation(const operation::get &op)
+{
+    std::shared_lock lock(_connection_lock);
+    session_context_ptr session = txn_session(op.txn_id);
+    WT_CURSOR *cursor = session->cursor(op.table_id);
+    int ret = wt_cursor_search(cursor, op.key);
+    if (ret != 0)
+        return ret;
+    data_value value = get_wt_cursor_value(cursor);
+    /* FIXME-WT-14863 actually use the value we read. */
     return 0;
 }
 

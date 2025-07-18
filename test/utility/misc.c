@@ -223,63 +223,74 @@ testutil_cleanup(TEST_OPTS *opts)
 
 /*
  * testutil_copy_data --
- *     Copy the data to a backup folder. Usually, the data copy is cleaned up by a call to
- *     testutil_clean_test_artifacts.
+ *     Copy the data to a backup folder alongside the current directory. Usually, the data copy is
+ *     cleaned up by a call to testutil_clean_test_artifacts.
  */
 void
-testutil_copy_data(const char *dir)
+testutil_copy_data(void)
 {
     WT_FILE_COPY_OPTS opts;
+    char dir[1024];
     char save_dir[512];
+
+    testutil_assert_errno(getcwd(dir, sizeof(dir)) != NULL);
 
     memset(&opts, 0, sizeof(opts));
     opts.preserve = true;
 
-    testutil_snprintf(save_dir, sizeof(save_dir), ".." DIR_DELIM_STR "%s.SAVE", dir);
+    testutil_snprintf(save_dir, sizeof(save_dir), "%s.SAVE", dir);
     testutil_remove(save_dir);
     testutil_copy_ext(".", save_dir, &opts);
 }
 
 /*
  * testutil_copy_data_opt --
- *     Copy the data to a backup folder. Directories and files with the specified "readonly prefix"
- *     will be hard-linked instead of copied for efficiency on supported platforms.
+ *     Copy the data to a backup folder alongside the current directory. Directories and files with
+ *     the specified "readonly prefix" will be hard-linked instead of copied for efficiency on
+ *     supported platforms.
  */
 void
-testutil_copy_data_opt(const char *dir, const char *readonly_prefix)
+testutil_copy_data_opt(const char *readonly_prefix)
 {
     WT_FILE_COPY_OPTS opts;
+    char dir[1024];
     char save_dir[512];
+
+    testutil_assert_errno(getcwd(dir, sizeof(dir)) != NULL);
 
     memset(&opts, 0, sizeof(opts));
     opts.link = true;
     opts.link_if_prefix = readonly_prefix;
     opts.preserve = true;
 
-    testutil_snprintf(save_dir, sizeof(save_dir), ".." DIR_DELIM_STR "%s.SAVE", dir);
+    testutil_snprintf(save_dir, sizeof(save_dir), "%s.SAVE", dir);
     testutil_remove(save_dir);
     testutil_copy_ext(".", save_dir, &opts);
 }
 
 /*
  * testutil_clean_test_artifacts --
- *     Clean any temporary files and folders created during test execution
+ *     Clean any temporary files and folders created during test execution from the current
+ *     directory.
  */
 void
-testutil_clean_test_artifacts(const char *dir)
+testutil_clean_test_artifacts(void)
 {
     char buf[512];
+    char dir[1024];
 
-    testutil_snprintf(buf, sizeof(buf), ".." DIR_DELIM_STR "%s.SAVE", dir);
+    testutil_assert_errno(getcwd(dir, sizeof(dir)) != NULL);
+
+    testutil_snprintf(buf, sizeof(buf), "%s.SAVE", dir);
     testutil_remove(buf);
 
-    testutil_snprintf(buf, sizeof(buf), ".." DIR_DELIM_STR "%s.CHECK", dir);
+    testutil_snprintf(buf, sizeof(buf), "%s.CHECK", dir);
     testutil_remove(buf);
 
-    testutil_snprintf(buf, sizeof(buf), ".." DIR_DELIM_STR "%s.DEBUG", dir);
+    testutil_snprintf(buf, sizeof(buf), "%s.DEBUG", dir);
     testutil_remove(buf);
 
-    testutil_snprintf(buf, sizeof(buf), ".." DIR_DELIM_STR "%s.BACKUP", dir);
+    testutil_snprintf(buf, sizeof(buf), "%s.BACKUP", dir);
     testutil_remove(buf);
 }
 
@@ -373,15 +384,18 @@ void
 testutil_wiredtiger_open(TEST_OPTS *opts, const char *home, const char *config,
   WT_EVENT_HANDLER *event_handler, WT_CONNECTION **connectionp, bool rerun, bool benchmarkrun)
 {
-    char buf[1024], tiered_cfg[512], tiered_ext_cfg[512];
+    char buf[1024], disagg_cfg[512], disagg_ext_cfg[512], tiered_cfg[512], tiered_ext_cfg[512];
 
     opts->local_retention = benchmarkrun ? 0 : 2;
+    testutil_disagg_storage_configuration(
+      opts, home, disagg_cfg, sizeof(disagg_cfg), disagg_ext_cfg, sizeof(disagg_ext_cfg));
     testutil_tiered_storage_configuration(
       opts, home, tiered_cfg, sizeof(tiered_cfg), tiered_ext_cfg, sizeof(tiered_ext_cfg));
 
-    testutil_snprintf(buf, sizeof(buf), "%s%s%s%s,extensions=[%s]", config == NULL ? "" : config,
-      (rerun ? TESTUTIL_ENV_CONFIG_REC : ""), (opts->compat ? TESTUTIL_ENV_CONFIG_COMPAT : ""),
-      tiered_cfg, tiered_ext_cfg);
+    testutil_snprintf(buf, sizeof(buf), "%s%s%s%s%s,extensions=[%s,%s]",
+      config == NULL ? "" : config, (rerun ? TESTUTIL_ENV_CONFIG_REC : ""),
+      (opts->compat ? TESTUTIL_ENV_CONFIG_COMPAT : ""), disagg_cfg, tiered_cfg, disagg_ext_cfg,
+      tiered_ext_cfg);
 
     if (opts->verbose)
         printf("wiredtiger_open configuration: %s\n", buf);

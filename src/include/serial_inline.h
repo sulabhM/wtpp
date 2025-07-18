@@ -142,6 +142,21 @@ __col_append_serial_func(WT_SESSION_IMPL *session, WT_INSERT_HEAD *ins_head, WT_
 }
 
 /*
+ * __wt_page_modify_update_timestamp --
+ *     Set the newest update timestamp to the approximate newest global timestamp, this is only used
+ *     to optimize eviction decisions. It is approximate and that's OK.
+ */
+static WT_INLINE void
+__wt_page_modify_update_timestamp(WT_SESSION_IMPL *session, WT_PAGE *page)
+{
+    /* Race is OK here as it is an approximate value. */
+    wt_timestamp_t newest_seen_timestamp =
+      __wt_atomic_load64(&S2C(session)->txn_global.newest_seen_timestamp);
+    if (newest_seen_timestamp > __wt_atomic_load64(&page->modify->newest_commit_timestamp))
+        __wt_atomic_store64(&page->modify->newest_commit_timestamp, newest_seen_timestamp);
+}
+
+/*
  * __wt_col_append_serial --
  *     Append a new column-store entry.
  */
@@ -178,10 +193,16 @@ __wt_col_append_serial(WT_SESSION_IMPL *session, WT_PAGE *page, WT_INSERT_HEAD *
      * we added cannot be discarded while visible to any running transaction, and we're a running
      * transaction, which means there can be no corresponding delete until we complete.
      */
-    __wt_cache_page_inmem_incr(session, page, new_ins_size);
+    __wt_cache_page_inmem_incr(session, page, new_ins_size, true);
 
     /* Mark the page dirty after updating the footprint. */
     __wt_page_modify_set(session, page);
+
+    /*
+     * Set the newest update timestamp to the approximate newest global timestamp. It's approximate
+     * and used as an eviction heuristic.
+     */
+    __wt_page_modify_update_timestamp(session, page);
 
     return (0);
 }
@@ -230,10 +251,16 @@ __wt_insert_serial(WT_SESSION_IMPL *session, WT_PAGE *page, WT_INSERT_HEAD *ins_
      * we added cannot be discarded while visible to any running transaction, and we're a running
      * transaction, which means there can be no corresponding delete until we complete.
      */
-    __wt_cache_page_inmem_incr(session, page, new_ins_size);
+    __wt_cache_page_inmem_incr(session, page, new_ins_size, true);
 
     /* Mark the page dirty after updating the footprint. */
     __wt_page_modify_set(session, page);
+
+    /*
+     * Set the newest update timestamp to the approximate newest global timestamp. It's approximate
+     * and used as an eviction heuristic.
+     */
+    __wt_page_modify_update_timestamp(session, page);
 
     return (0);
 }
@@ -281,10 +308,16 @@ __wt_update_serial(WT_SESSION_IMPL *session, WT_CURSOR_BTREE *cbt, WT_PAGE *page
      * structures we added cannot be discarded while visible to any running transaction, and we're a
      * running transaction, which means there can be no corresponding delete until we complete.
      */
-    __wt_cache_page_inmem_incr(session, page, upd_size);
+    __wt_cache_page_inmem_incr(session, page, upd_size, true);
 
     /* Mark the page dirty after updating the footprint. */
     __wt_page_modify_set(session, page);
+
+    /*
+     * Set the newest update timestamp to the approximate newest global timestamp. It's approximate
+     * and used as an eviction heuristic.
+     */
+    __wt_page_modify_update_timestamp(session, page);
 
     /*
      * Don't remove obsolete updates in the history store, due to having different visibility rules

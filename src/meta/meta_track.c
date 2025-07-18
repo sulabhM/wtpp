@@ -283,7 +283,7 @@ __wt_meta_track_off(WT_SESSION_IMPL *session, bool need_sync, bool unroll)
     /* If we're logging, make sure the metadata update was flushed. */
     if (F_ISSET(&S2C(session)->log_mgr, WT_LOG_ENABLED))
         WT_WITH_DHANDLE(session, WT_SESSION_META_DHANDLE(session),
-          ret = __wt_txn_checkpoint_log(session, false, WT_TXN_LOG_CKPT_SYNC, NULL));
+          ret = __wt_checkpoint_log(session, false, WT_TXN_LOG_CKPT_SYNC, NULL));
     else {
         WT_ASSERT(session, FLD_ISSET(session->lock_flags, WT_SESSION_LOCKED_SCHEMA));
         ckpt_session = S2C(session)->meta_ckpt_session;
@@ -294,7 +294,7 @@ __wt_meta_track_off(WT_SESSION_IMPL *session, bool need_sync, bool unroll)
         ckpt_session->txn->id = session->txn->id;
         WT_ASSERT(session, !FLD_ISSET(session->lock_flags, WT_SESSION_LOCKED_METADATA));
         WT_WITH_DHANDLE(ckpt_session, WT_SESSION_META_DHANDLE(session),
-          WT_WITH_METADATA_LOCK(ckpt_session, ret = __wt_checkpoint(ckpt_session, NULL)));
+          WT_WITH_METADATA_LOCK(ckpt_session, ret = __wt_checkpoint_file(ckpt_session, NULL)));
         ckpt_session->txn->id = WT_TXN_NONE;
         if (ret == 0)
             WT_WITH_DHANDLE(
@@ -328,7 +328,7 @@ err:
         WT_ASSERT(session, unroll || saved_ret != 0 || session->txn->mod_count == 0);
 #ifdef WT_ENABLE_SCHEMA_TXN
         __wt_err(session, saved_ret, "TRACK: Abort internal schema txn");
-        WT_TRET(__wt_txn_rollback(session, NULL));
+        WT_TRET(__wt_txn_rollback(session, NULL, false));
 #endif
     }
 

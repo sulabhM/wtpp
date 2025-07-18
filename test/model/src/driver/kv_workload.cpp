@@ -144,6 +144,10 @@ parse(const char *str)
         CHECK_NUM_ARGS_RANGE(0, 1);
         return checkpoint(args.size() == 0 ? nullptr : args[0].c_str());
     }
+    if (name == "checkpoint_crash") {
+        CHECK_NUM_ARGS(1);
+        return checkpoint_crash(parse_uint64(args[0]));
+    }
     if (name == "commit_transaction") {
         CHECK_NUM_ARGS_RANGE(1, 3);
         return commit_transaction(parse_uint64(args[0]),
@@ -162,6 +166,10 @@ parse(const char *str)
     if (name == "evict") {
         CHECK_NUM_ARGS(2);
         return evict(parse_uint64(args[0]), data_value(parse_uint64(args[1])));
+    }
+    if (name == "get") {
+        CHECK_NUM_ARGS(3);
+        return get(parse_uint64(args[0]), parse_uint64(args[1]), data_value(parse_uint64(args[2])));
     }
     if (name == "insert") {
         CHECK_NUM_ARGS(4);
@@ -323,6 +331,7 @@ kv_workload::assert_timestamps()
                 ckpt_oldest = k_timestamp_none;
         }
         if (std::holds_alternative<operation::crash>(op) ||
+          std::holds_alternative<operation::checkpoint_crash>(op) ||
           std::holds_alternative<operation::restart>(op)) {
             oldest = ckpt_oldest;
             stable = ckpt_stable;

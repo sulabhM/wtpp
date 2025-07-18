@@ -312,11 +312,15 @@ __wt_evict_page_cache_bytes_decr(WT_SESSION_IMPL *session, WT_PAGE *page)
               session, &btree->bytes_dirty_intl, modify->bytes_dirty, "WT_BTREE.bytes_dirty_intl");
             __wt_cache_decr_check_uint64(
               session, &cache->bytes_dirty_intl, modify->bytes_dirty, "WT_CACHE.bytes_dirty_intl");
-        } else if (!btree->lsm_primary) {
+        } else {
             __wt_cache_decr_check_uint64(
               session, &btree->bytes_dirty_leaf, modify->bytes_dirty, "WT_BTREE.bytes_dirty_leaf");
             __wt_cache_decr_check_uint64(
               session, &cache->bytes_dirty_leaf, modify->bytes_dirty, "WT_CACHE.bytes_dirty_leaf");
+            __wt_cache_decr_check_uint64(session, &btree->bytes_delta_updates,
+              modify->bytes_delta_updates, "WT_BTREE.bytes_delta_updates");
+            __wt_cache_decr_check_uint64(session, &cache->bytes_delta_updates,
+              modify->bytes_delta_updates, "WT_CACHE.bytes_delta_updates");
         }
     }
 
@@ -588,6 +592,28 @@ __wti_evict_hs_dirty(WT_SESSION_IMPL *session)
       ((uint64_t)(conn->evict->eviction_dirty_trigger * bytes_max) / 100));
 }
 
+/*
+ * __evict_check_user_ok_with_eviction --
+ *     Check if the user wants to abort eviction in this session. #private
+ */
+static bool
+__evict_check_user_ok_with_eviction(WT_SESSION_IMPL *session, bool interruptible)
+{
+    /* Ask the user only if eviction is optional and it's a user session. */
+    if (!interruptible || F_ISSET(session, WT_SESSION_INTERNAL))
+        return (true);
+
+    WT_EVENT_HANDLER *event_handler = session->event_handler;
+    if (event_handler->handle_general != NULL &&
+      event_handler->handle_general(
+        event_handler, &S2C(session)->iface, &session->iface, WT_EVENT_EVICTION, NULL) != 0) {
+        WT_STAT_CONN_INCR(session, eviction_interupted_by_app);
+        return (false);
+    }
+
+    return (true);
+}
+
 /* !!!
  * __wt_evict_app_assist_worker_check --
  *     Check if eviction trigger thresholds have reached to determine whether application threads
@@ -595,25 +621,26 @@ __wti_evict_hs_dirty(WT_SESSION_IMPL *session)
  *
  *     Input parameters:
  *       (1) `busy`: A flag indicating if the session is actively pinning resources, in which
- *            case dirty trigger is ignored.
+ *            case eviction work should be limited.
  *       (2) `readonly`: A flag indicating if the session is read-only, in which case dirty and
- *            update triggers are ignored.
- *       (3) `didworkp`: A pointer to indicate whether eviction work was done (optional).
+ *          update triggers are ignored.
+ *       (3) `interruptible`: A flag indicating if the user is allowed to interrupt eviction.
+ *       (4) `didworkp`: A pointer to indicate whether eviction work was done (optional).
  *
- *     Return an  error code from `__wti_evict_app_assist_worker` if it is unable to perform
+ *     Return an error code from `__wti_evict_app_assist_worker` if it is unable to perform
  *     meaningful work (eviction cache stuck).
  */
 static WT_INLINE int
 __wt_evict_app_assist_worker_check(
-  WT_SESSION_IMPL *session, bool busy, bool readonly, bool *didworkp)
+  WT_SESSION_IMPL *session, bool busy, bool readonly, bool interruptible, bool *didworkp)
 {
-    WT_BTREE *btree;
-    WT_TXN_GLOBAL *txn_global;
-    WT_TXN_SHARED *txn_shared;
-    double pct_full;
-
     if (didworkp != NULL)
         *didworkp = false;
+
+    /* It is not safe to proceed if the eviction server threads aren't setup yet. */
+    WT_CONNECTION_IMPL *conn = S2C(session);
+    if (!__wt_atomic_loadbool(&conn->evict_server_running))
+        return (0);
 
     /* Eviction causes reconciliation. So don't evict if we can't reconcile */
     if (F_ISSET(session, WT_SESSION_NO_RECONCILE))
@@ -621,6 +648,10 @@ __wt_evict_app_assist_worker_check(
 
     /* If the transaction is prepared don't evict. */
     if (F_ISSET(session->txn, WT_TXN_PREPARE))
+        return (0);
+
+    /* FIXME-WT-12905: Pre-fetch threads are not allowed to be pulled into eviction. */
+    if (F_ISSET(session, WT_SESSION_PREFETCH_THREAD))
         return (0);
 
     /*
@@ -632,23 +663,31 @@ __wt_evict_app_assist_worker_check(
     if (F_ISSET(session->txn, WT_TXN_IS_CHECKPOINT))
         return (0);
 
+    /* Setting cache_max_wait_us to 1 effectively means "disable eviction when possible" */
+    uint64_t cache_max_wait_us =
+      session->cache_max_wait_us != 0 ? session->cache_max_wait_us : conn->evict->cache_max_wait_us;
+    if (cache_max_wait_us == 1)
+        return (0);
+
     /*
      * If the current transaction is keeping the oldest ID pinned, it is in the middle of an
      * operation. This may prevent the oldest ID from moving forward, leading to deadlock, so only
      * evict what we can. Otherwise, we are at a transaction boundary and we can work harder to make
      * sure there is free space in the cache.
      */
-    txn_global = &S2C(session)->txn_global;
-    txn_shared = WT_SESSION_TXN_SHARED(session);
+    WT_TXN_GLOBAL *txn_global = &conn->txn_global;
+    WT_TXN_SHARED *txn_shared = WT_SESSION_TXN_SHARED(session);
     busy = busy || __wt_atomic_loadv64(&txn_shared->id) != WT_TXN_NONE ||
       session->hazards.num_active > 0 ||
       (__wt_atomic_loadv64(&txn_shared->pinned_id) != WT_TXN_NONE &&
         __wt_atomic_loadv64(&txn_global->current) != __wt_atomic_loadv64(&txn_global->oldest_id));
 
     /*
-     * LSM sets the "ignore cache size" flag when holding the LSM tree lock, in that case, or when
-     * holding the handle list, schema or table locks (which can block checkpoints and eviction),
-     * don't block the thread for eviction.
+     * Don't block the thread for eviction when holding the handle list, schema or table locks
+     * (which can block checkpoints and eviction), or if the "ignore cache size" flag is set. Some
+     * internal threads such as the sweep server and background compact will set the "ignore cache
+     * size" flag for this reason. Sessions can also set this flag using the "ignore_cache_size"
+     * configuration.
      */
     if (F_ISSET(session, WT_SESSION_IGNORE_CACHE_SIZE) ||
       FLD_ISSET(session->lock_flags,
@@ -656,7 +695,7 @@ __wt_evict_app_assist_worker_check(
         return (0);
 
     /* In memory configurations don't block when the cache is full. */
-    if (F_ISSET(S2C(session), WT_CONN_IN_MEMORY))
+    if (F_ISSET(conn, WT_CONN_IN_MEMORY))
         return (0);
 
     /*
@@ -664,12 +703,24 @@ __wt_evict_app_assist_worker_check(
      * problem. We also don't block while reading metadata because we're likely to be holding some
      * other resources that could block checkpoints or eviction.
      */
-    btree = S2BT_SAFE(session);
-    if (btree != NULL && (F_ISSET(btree, WT_BTREE_IN_MEMORY) || WT_IS_METADATA(session->dhandle)))
+    WT_BTREE *btree = S2BT_SAFE(session);
+    if (btree != NULL && (F_ISSET(btree, WT_BTREE_NO_EVICT) || WT_IS_METADATA(session->dhandle)))
         return (0);
 
     /* Check if eviction is needed. */
+    double pct_full;
     if (!__wt_evict_needed(session, busy, readonly, &pct_full))
+        return (0);
+
+    /*
+     * If the caller is holding shared resources, only evict if the cache is at any of its eviction
+     * targets.
+     */
+    if (busy && pct_full < 100.0)
+        return (0);
+
+    /* Last check if application wants to prevent the thread from evicting. */
+    if (!__evict_check_user_ok_with_eviction(session, interruptible))
         return (0);
 
     /*
@@ -679,7 +730,7 @@ __wt_evict_app_assist_worker_check(
     if (didworkp != NULL)
         *didworkp = true;
 
-    return (__wti_evict_app_assist_worker(session, busy, readonly, pct_full));
+    return (__wti_evict_app_assist_worker(session, busy, readonly, interruptible));
 }
 
 /*

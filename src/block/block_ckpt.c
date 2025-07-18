@@ -391,7 +391,7 @@ __ckpt_verify(WT_SESSION_IMPL *session, WT_CKPT *ckptbase)
         case WT_CKPT_DELETE | WT_CKPT_FAKE:
         case WT_CKPT_FAKE:
             break;
-        case WT_CKPT_ADD | WT_CKPT_BLOCK_MODS:
+        case WT_CKPT_ADD | WT_CKPT_BLOCK_MODS_LIST:
         case WT_CKPT_ADD:
             if (ckpt[1].name == NULL)
                 break;
@@ -402,6 +402,9 @@ __ckpt_verify(WT_SESSION_IMPL *session, WT_CKPT *ckptbase)
     return (0);
 }
 
+/* At the default granularity, this is enough for blocks in a 2G file. */
+#define WT_BLOCK_MODS_LIST_MIN 128 /* Initial bits for bitmap. */
+
 /*
  * __ckpt_mod_blkmod_entry --
  *     Modify an offset/length entry to the bitstring based on granularity. We may either set or
@@ -409,7 +412,7 @@ __ckpt_verify(WT_SESSION_IMPL *session, WT_CKPT *ckptbase)
  */
 static int
 __ckpt_mod_blkmod_entry(
-  WT_SESSION_IMPL *session, WT_BLOCK_MODS *blk_mod, wt_off_t offset, wt_off_t len, bool set)
+  WT_SESSION_IMPL *session, WT_CKPT_BLOCK_MODS *blk_mod, wt_off_t offset, wt_off_t len, bool set)
 {
     wt_off_t clr_len, clr_off;
     uint64_t adj, end_bit, gran, start_bit;
@@ -494,8 +497,8 @@ static int
 __ckpt_live_blkmods(
   WT_SESSION_IMPL *session, WT_CKPT *ckptbase, WT_BLOCK_CKPT *ci, WT_BLOCK *block, bool set)
 {
-    WT_BLOCK_MODS *blk_mod;
     WT_CKPT *ckpt;
+    WT_CKPT_BLOCK_MODS *blk_mod;
     WT_EXT *ext;
     u_int i;
 
@@ -508,12 +511,12 @@ __ckpt_live_blkmods(
             break;
     }
     /* If this is not the live checkpoint or we don't care about incremental blocks, we're done. */
-    if (ckpt == NULL || !F_ISSET(ckpt, WT_CKPT_BLOCK_MODS))
+    if (ckpt == NULL || !F_ISSET(ckpt, WT_CKPT_BLOCK_MODS_LIST))
         return (0);
     for (i = 0; i < WT_BLKINCR_MAX; ++i) {
         blk_mod = &ckpt->backup_blocks[i];
         /* If there is no information at this entry, we're done. */
-        if (!F_ISSET(blk_mod, WT_BLOCK_MODS_VALID))
+        if (!F_ISSET(blk_mod, WT_CKPT_BLOCK_MODS_VALID))
             continue;
 
         if (set) {
@@ -540,8 +543,8 @@ __ckpt_live_blkmods(
 static int
 __ckpt_add_blk_mods_ext(WT_SESSION_IMPL *session, WT_CKPT *ckptbase, WT_BLOCK_CKPT *ci)
 {
-    WT_BLOCK_MODS *blk_mod;
     WT_CKPT *ckpt;
+    WT_CKPT_BLOCK_MODS *blk_mod;
     u_int i;
 
     WT_CKPT_FOREACH (ckptbase, ckpt) {
@@ -549,12 +552,12 @@ __ckpt_add_blk_mods_ext(WT_SESSION_IMPL *session, WT_CKPT *ckptbase, WT_BLOCK_CK
             break;
     }
     /* If this is not the live checkpoint or we don't care about incremental blocks, we're done. */
-    if (ckpt == NULL || !F_ISSET(ckpt, WT_CKPT_BLOCK_MODS))
+    if (ckpt == NULL || !F_ISSET(ckpt, WT_CKPT_BLOCK_MODS_LIST))
         return (0);
     for (i = 0; i < WT_BLKINCR_MAX; ++i) {
         blk_mod = &ckpt->backup_blocks[i];
         /* If there is no information at this entry, we're done. */
-        if (!F_ISSET(blk_mod, WT_BLOCK_MODS_VALID))
+        if (!F_ISSET(blk_mod, WT_CKPT_BLOCK_MODS_VALID))
             continue;
 
         if (ci->alloc.offset != WT_BLOCK_INVALID_OFFSET)
@@ -1081,10 +1084,61 @@ err:
     return (ret);
 }
 
+/*
+ * __wti_block_checkpoint_extlist_dump --
+ *     Dump all of the available checkpoints extent lists, excluding the specified offset. Extent
+ *     offsets should never be 0, as that is the offset of the file header.
+ */
+int
+__wti_block_checkpoint_extlist_dump(WT_SESSION_IMPL *session, WT_BLOCK *block)
+{
+    WT_BLOCK_CKPT *ci;
+    WT_CKPT *ckpt_iter, *ckptbase;
+    WT_DECL_RET;
+    size_t ckpt_bytes_allocated;
+
+    ckptbase = NULL;
+
+    WT_ERR(__wt_meta_ckptlist_get(
+      session, session->dhandle->name, false, &ckptbase, &ckpt_bytes_allocated));
+    WT_CKPT_FOREACH (ckptbase, ckpt_iter) {
+        WT_ERR(__wt_calloc(session, 1, sizeof(WT_BLOCK_CKPT), &ckpt_iter->bpriv));
+        ci = ckpt_iter->bpriv;
+
+        WT_ERR(__wti_block_ckpt_init(session, ci, ckpt_iter->name));
+        WT_ERR(
+          __wti_block_ckpt_unpack(session, block, ckpt_iter->raw.data, ckpt_iter->raw.size, ci));
+
+        if (ci->alloc.offset != WT_BLOCK_INVALID_OFFSET &&
+          __wti_block_extlist_read(session, block, &ci->alloc, ci->file_size) == 0)
+            WT_TRET(__wti_block_extlist_dump(session, &ci->alloc));
+
+        if (ci->avail.offset != WT_BLOCK_INVALID_OFFSET &&
+          __wti_block_extlist_read(session, block, &ci->avail, ci->file_size) == 0)
+            WT_TRET(__wti_block_extlist_dump(session, &ci->avail));
+
+        if (ci->discard.offset != WT_BLOCK_INVALID_OFFSET &&
+          __wti_block_extlist_read(session, block, &ci->discard, ci->file_size) == 0)
+            WT_TRET(__wti_block_extlist_dump(session, &ci->discard));
+
+        WT_ERR(ret);
+    }
+
+err:
+    /* Discard any checkpoint information we loaded. */
+    WT_CKPT_FOREACH (ckptbase, ckpt_iter)
+        if ((ci = ckpt_iter->bpriv) != NULL)
+            __wti_block_ckpt_destroy(session, ci);
+
+    __wt_ckptlist_free(session, &ckptbase);
+
+    return (ret);
+}
+
 #ifdef HAVE_UNITTEST
 int
 __ut_ckpt_mod_blkmod_entry(
-  WT_SESSION_IMPL *session, WT_BLOCK_MODS *blk_mod, wt_off_t offset, wt_off_t len)
+  WT_SESSION_IMPL *session, WT_CKPT_BLOCK_MODS *blk_mod, wt_off_t offset, wt_off_t len)
 {
     return (__ckpt_mod_blkmod_entry(session, blk_mod, offset, len, true));
 }

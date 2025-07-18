@@ -8,56 +8,27 @@
 
 #pragma once
 
-#define WT_CROSSING_MIN_BND(r, next_len) \
-    ((r)->cur_ptr->min_offset == 0 && (next_len) > (r)->min_space_avail)
-#define WT_CROSSING_SPLIT_BND(r, next_len) ((next_len) > (r)->space_avail)
-#define WT_CHECK_CROSSING_BND(r, next_len) \
-    (WT_CROSSING_MIN_BND(r, next_len) || WT_CROSSING_SPLIT_BND(r, next_len))
-
-/*
- * WT_REC_SPLIT_MIN_ITEMS_USE_MEM
- *     The minimum number of page items (entries on the disk image or saved updates) associated with
- *     a page required to consider in-memory updates in the split calculation.
- */
-#define WT_REC_SPLIT_MIN_ITEMS_USE_MEM 10
-
-/*
- * WT_REC_TW_START_VISIBLE_ALL
- *     Check if the provided time window's start is globally visible as per the saved state on the
- *     reconciliation structure.
- *
- *     An update is considered to be globally visible when its transaction id is less than the
- *     pinned id, and when its start timestamp is less than or equal to the pinned timestamp.
- *     Due to a difference in transaction id based visibility and timestamp visibility the timestamp
- *     comparison is inclusive whereas the transaction id comparison isn't.
- */
-#define WT_REC_TW_START_VISIBLE_ALL(r, tw)                     \
-    (WT_TXNID_LT((tw)->start_txn, (r)->rec_start_oldest_id) && \
-      ((tw)->durable_start_ts == WT_TS_NONE ||                 \
-        ((r)->rec_start_pinned_ts != WT_TS_NONE &&             \
-          (tw)->durable_start_ts <= (r)->rec_start_pinned_ts)))
-
 /*
  * __rec_cell_addr_stats --
  *     Track statistics for time values associated with an address.
  */
 static WT_INLINE void
-__rec_cell_addr_stats(WT_RECONCILE *r, WT_TIME_AGGREGATE *ta)
+__rec_cell_addr_stats(WTI_RECONCILE *r, WT_TIME_AGGREGATE *ta)
 {
     if (ta->newest_durable_ts != WT_TS_NONE)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_NEWEST_DURABLE_TS);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_DURABLE_TS);
     if (ta->newest_page_stop_durable_ts != WT_TS_NONE)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_NEWEST_PAGE_STOP_DURABLE_TS);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_PAGE_STOP_DURABLE_TS);
     if (ta->oldest_start_ts != WT_TS_NONE)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_OLDEST_START_TS);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_OLDEST_START_TS);
     if (ta->newest_txn != WT_TXN_NONE)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_NEWEST_TXN);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_TXN);
     if (ta->newest_stop_ts != WT_TS_MAX)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_NEWEST_STOP_TS);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_STOP_TS);
     if (ta->newest_stop_txn != WT_TXN_MAX)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_NEWEST_STOP_TXN);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_STOP_TXN);
     if (ta->prepare != 0)
-        FLD_SET(r->ts_usage_flags, WT_REC_TIME_PREPARE);
+        FLD_SET(r->ts_usage_flags, WTI_REC_TIME_PREPARE);
 }
 
 /*
@@ -65,7 +36,7 @@ __rec_cell_addr_stats(WT_RECONCILE *r, WT_TIME_AGGREGATE *ta)
  *     Gather statistics about this cell.
  */
 static WT_INLINE void
-__rec_cell_tw_stats(WT_RECONCILE *r, WT_TIME_WINDOW *tw)
+__rec_cell_tw_stats(WTI_RECONCILE *r, WT_TIME_WINDOW *tw)
 {
     if (tw->durable_start_ts != WT_TS_NONE)
         ++r->count_durable_start_ts;
@@ -88,7 +59,7 @@ __rec_cell_tw_stats(WT_RECONCILE *r, WT_TIME_WINDOW *tw)
  *     Clear page statistics.
  */
 static WT_INLINE void
-__rec_page_time_stats_clear(WT_RECONCILE *r)
+__rec_page_time_stats_clear(WTI_RECONCILE *r)
 {
     r->count_durable_start_ts = 0;
     r->count_start_ts = 0;
@@ -106,7 +77,7 @@ __rec_page_time_stats_clear(WT_RECONCILE *r)
  *     Update statistics about this page.
  */
 static WT_INLINE void
-__rec_page_time_stats(WT_SESSION_IMPL *session, WT_RECONCILE *r)
+__rec_page_time_stats(WT_SESSION_IMPL *session, WTI_RECONCILE *r)
 {
     /* Time window statistics */
     if (r->count_durable_start_ts != 0) {
@@ -160,19 +131,19 @@ __rec_page_time_stats(WT_SESSION_IMPL *session, WT_RECONCILE *r)
     }
 
     /* Time aggregate statistics */
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_NEWEST_DURABLE_TS))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_DURABLE_TS))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_newest_durable_ts);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_NEWEST_PAGE_STOP_DURABLE_TS))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_PAGE_STOP_DURABLE_TS))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_newest_page_stop_durable_ts);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_OLDEST_START_TS))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_OLDEST_START_TS))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_oldest_start_ts);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_NEWEST_TXN))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_TXN))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_newest_txn);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_NEWEST_STOP_TS))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_STOP_TS))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_newest_stop_ts);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_NEWEST_STOP_TXN))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_NEWEST_STOP_TXN))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_newest_stop_txn);
-    if (FLD_ISSET(r->ts_usage_flags, WT_REC_TIME_PREPARE))
+    if (FLD_ISSET(r->ts_usage_flags, WTI_REC_TIME_PREPARE))
         WT_STAT_CONN_DSRC_INCR(session, rec_time_aggr_prepared);
 }
 
@@ -181,9 +152,13 @@ __rec_page_time_stats(WT_SESSION_IMPL *session, WT_RECONCILE *r)
  *     Check whether adding some bytes to the page requires a split.
  */
 static WT_INLINE bool
-__wti_rec_need_split(WT_RECONCILE *r, size_t len)
+__wti_rec_need_split(WTI_RECONCILE *r, size_t len)
 {
     uint32_t page_items;
+
+    /* We cannot split a page that is restored from deltas. */
+    if (F_ISSET(r, WT_REC_REWRITE_DELTA))
+        return (false);
 
     page_items = r->entries + r->supd_next;
 
@@ -200,11 +175,11 @@ __wti_rec_need_split(WT_RECONCILE *r, size_t len)
      * the update structure could skew the calculation, so we subtract the overhead before
      * considering the cache usage by the updates.
      */
-    if (r->page->type == WT_PAGE_ROW_LEAF && page_items > WT_REC_SPLIT_MIN_ITEMS_USE_MEM)
+    if (r->page->type == WT_PAGE_ROW_LEAF && page_items > WTI_REC_SPLIT_MIN_ITEMS_USE_MEM)
         len += (r->supd_memsize - ((size_t)r->supd_next * WT_UPDATE_SIZE)) / 10;
 
     /* Check for the disk image crossing a boundary. */
-    return (WT_CHECK_CROSSING_BND(r, len));
+    return (WTI_CHECK_CROSSING_BND(r, len));
 }
 
 /*
@@ -212,7 +187,7 @@ __wti_rec_need_split(WT_RECONCILE *r, size_t len)
  *     Update the memory tracking structure for a set of new entries.
  */
 static WT_INLINE void
-__wti_rec_incr(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t v, size_t size)
+__wti_rec_incr(WT_SESSION_IMPL *session, WTI_RECONCILE *r, uint32_t v, size_t size)
 {
     /*
      * The buffer code is fragile and prone to off-by-one errors -- check for overflow in diagnostic
@@ -239,14 +214,14 @@ __wti_rec_incr(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t v, size_t siz
 }
 
 /*
- * __wti_rec_image_copy --
- *     Copy a key/value cell and buffer pair into the new image.
+ * __wti_rec_kv_copy --
+ *     Copy a key/value cell and buffer pair. FIXME-WT-14887: ensure memory safety on the pointer.
  */
 static WT_INLINE void
-__wti_rec_image_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_KV *kv)
+__wti_rec_kv_copy(WT_SESSION_IMPL *session, uint8_t *p, WTI_REC_KV *kv)
 {
     size_t len;
-    uint8_t *p, *t;
+    uint8_t *t;
 
     /*
      * If there's only one chunk of data to copy (because the cell and data are being copied from
@@ -255,7 +230,7 @@ __wti_rec_image_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_KV *kv)
      *
      * WT_CELLs are typically small, 1 or 2 bytes -- don't call memcpy, do the copy in-line.
      */
-    for (p = r->first_free, t = (uint8_t *)&kv->cell, len = kv->cell_len; len > 0; --len)
+    for (t = (uint8_t *)&kv->cell, len = kv->cell_len; len > 0; --len)
         *p++ = *t++;
 
     /* The data can be quite large -- call memcpy. */
@@ -263,6 +238,16 @@ __wti_rec_image_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_KV *kv)
         memcpy(p, kv->buf.data, kv->buf.size);
 
     WT_ASSERT(session, kv->len == kv->cell_len + kv->buf.size);
+}
+
+/*
+ * __wti_rec_image_copy --
+ *     Copy a key/value cell and buffer pair into the new image.
+ */
+static WT_INLINE void
+__wti_rec_image_copy(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WTI_REC_KV *kv)
+{
+    __wti_rec_kv_copy(session, r->first_free, kv);
     __wti_rec_incr(session, r, 1, kv->len);
 }
 
@@ -271,7 +256,7 @@ __wti_rec_image_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_REC_KV *kv)
  *     Update the memory tracking structure for a set of new entries in the auxiliary image.
  */
 static WT_INLINE void
-__rec_auxincr(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t v, size_t size)
+__rec_auxincr(WT_SESSION_IMPL *session, WTI_RECONCILE *r, uint32_t v, size_t size)
 {
     /*
      * The buffer code is fragile and prone to off-by-one errors -- check for overflow in diagnostic
@@ -291,7 +276,7 @@ __rec_auxincr(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t v, size_t size
  *     Copy a key/value cell and buffer pair into the new auxiliary image.
  */
 static WT_INLINE void
-__wti_rec_auximage_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t count, WT_REC_KV *kv)
+__wti_rec_auximage_copy(WT_SESSION_IMPL *session, WTI_RECONCILE *r, uint32_t count, WTI_REC_KV *kv)
 {
     size_t len;
     uint8_t *p;
@@ -324,10 +309,10 @@ __wti_rec_auximage_copy(WT_SESSION_IMPL *session, WT_RECONCILE *r, uint32_t coun
  *     Process an address or unpack reference and return a cell structure to be stored on the page.
  */
 static WT_INLINE void
-__wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_ADDR *addr,
+__wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_ADDR *addr,
   WT_CELL_UNPACK_ADDR *vpack, uint64_t recno, WT_PAGE_DELETED *page_del)
 {
-    WT_REC_KV *val;
+    WTI_REC_KV *val;
     WT_TIME_AGGREGATE *ta;
     u_int cell_type;
 
@@ -351,7 +336,7 @@ __wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_ADDR *ad
             cell_type = WT_CELL_ADDR_LEAF_NO;
             break;
         }
-        WT_ASSERT(session, addr->size != 0);
+        WT_ASSERT(session, addr->block_cookie_size != 0);
         ta = &addr->ta;
     } else {
         cell_type = vpack->type;
@@ -385,8 +370,8 @@ __wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_ADDR *ad
      */
     if (vpack == NULL) {
         WT_ASSERT(session, addr != NULL);
-        val->buf.data = addr->addr;
-        val->buf.size = addr->size;
+        val->buf.data = addr->block_cookie;
+        val->buf.size = addr->block_cookie_size;
     } else {
         WT_ASSERT(session, addr == NULL);
         val->buf.data = vpack->data;
@@ -403,11 +388,11 @@ __wti_rec_cell_build_addr(WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_ADDR *ad
  *     Process a data item and return a WT_CELL structure and byte string to be stored on the page.
  */
 static WT_INLINE int
-__wti_rec_cell_build_val(WT_SESSION_IMPL *session, WT_RECONCILE *r, const void *data, size_t size,
+__wti_rec_cell_build_val(WT_SESSION_IMPL *session, WTI_RECONCILE *r, const void *data, size_t size,
   WT_TIME_WINDOW *tw, uint64_t rle)
 {
     WT_BTREE *btree;
-    WT_REC_KV *val;
+    WTI_REC_KV *val;
 
     btree = S2BT(session);
     val = &r->v;
@@ -440,9 +425,9 @@ __wti_rec_cell_build_val(WT_SESSION_IMPL *session, WT_RECONCILE *r, const void *
  */
 static WT_INLINE int
 __wti_rec_dict_replace(
-  WT_SESSION_IMPL *session, WT_RECONCILE *r, WT_TIME_WINDOW *tw, uint64_t rle, WT_REC_KV *val)
+  WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_TIME_WINDOW *tw, uint64_t rle, WTI_REC_KV *val)
 {
-    WT_REC_DICTIONARY *dp;
+    WTI_REC_DICTIONARY *dp;
     uint64_t offset;
 
     /*
@@ -488,8 +473,8 @@ __wti_rec_dict_replace(
  *     Where possible modify time window values to avoid writing obsolete values to the cell later.
  */
 static WT_INLINE void
-__wti_rec_time_window_clear_obsolete(
-  WT_SESSION_IMPL *session, WT_UPDATE_SELECT *upd_select, WT_CELL_UNPACK_KV *vpack, WT_RECONCILE *r)
+__wti_rec_time_window_clear_obsolete(WT_SESSION_IMPL *session, WTI_UPDATE_SELECT *upd_select,
+  WT_CELL_UNPACK_KV *vpack, WTI_RECONCILE *r)
 {
     WT_TIME_WINDOW *tw;
 
@@ -506,12 +491,13 @@ __wti_rec_time_window_clear_obsolete(
      * create an extra update on the end of the chain later in reconciliation as we'll re-append the
      * disk image value to the update chain.
      */
-    if (!tw->prepare && !F_ISSET(S2C(session), WT_CONN_IN_MEMORY)) {
+    if (!tw->prepare && !F_ISSET(S2C(session), WT_CONN_IN_MEMORY) &&
+      !F_ISSET(S2BT(session), WT_BTREE_IN_MEMORY)) {
         /*
          * Check if the start of the time window is globally visible, and if so remove unnecessary
          * values.
          */
-        if (WT_REC_TW_START_VISIBLE_ALL(r, tw)) {
+        if (WTI_REC_TW_START_VISIBLE_ALL(r, tw)) {
             /* The durable timestamp should never be less than the start timestamp. */
             WT_ASSERT(session, tw->start_ts <= tw->durable_start_ts);
 

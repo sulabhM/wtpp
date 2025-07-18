@@ -32,21 +32,23 @@ struct __wt_cache {
     wt_shared uint64_t bytes_dirty_intl; /* Bytes/pages currently dirty */
     wt_shared uint64_t bytes_dirty_leaf;
     wt_shared uint64_t bytes_dirty_total;
-    wt_shared uint64_t bytes_evict;      /* Bytes/pages discarded by eviction */
-    wt_shared uint64_t bytes_image_intl; /* Bytes of disk images (internal) */
-    wt_shared uint64_t bytes_image_leaf; /* Bytes of disk images (leaf) */
-    wt_shared uint64_t bytes_inmem;      /* Bytes/pages in memory */
-    wt_shared uint64_t bytes_internal;   /* Bytes of internal pages */
-    wt_shared uint64_t bytes_read;       /* Bytes read into memory */
-    wt_shared uint64_t bytes_updates;    /* Bytes of updates to pages */
+    wt_shared uint64_t bytes_evict;         /* Bytes/pages discarded by eviction */
+    wt_shared uint64_t bytes_image_intl;    /* Bytes of disk images (internal) */
+    wt_shared uint64_t bytes_image_leaf;    /* Bytes of disk images (leaf) */
+    wt_shared uint64_t bytes_inmem;         /* Bytes/pages in memory */
+    wt_shared uint64_t bytes_internal;      /* Bytes of internal pages */
+    wt_shared uint64_t bytes_read;          /* Bytes read into memory */
+    wt_shared uint64_t bytes_updates;       /* Bytes of updates to pages */
+    wt_shared uint64_t bytes_delta_updates; /* Bytes of updates reconstructed from deltas */
     wt_shared uint64_t bytes_written;
 
     /*
      * History store cache usage. TODO: The values for these variables are cached and potentially
      * outdated.
      */
-    wt_shared uint64_t bytes_hs; /* History store bytes inmem */
-    uint64_t bytes_hs_dirty;     /* History store bytes inmem dirty */
+    wt_shared uint64_t bytes_hs;         /* History store bytes inmem */
+    wt_shared uint64_t bytes_hs_dirty;   /* History store bytes inmem dirty */
+    wt_shared uint64_t bytes_hs_updates; /* History store bytes inmem updates */
 
     wt_shared uint64_t pages_dirty_intl;
     wt_shared uint64_t pages_dirty_leaf;
@@ -117,3 +119,6 @@ struct __wt_cache_pool {
  * file.
  */
 #define WT_IS_HS(dh) F_ISSET(dh, WT_DHANDLE_HS)
+
+/* Optimize comparisons against the shared metadata store for disaggregated storage. */
+#define WT_IS_DISAGG_META(dh) F_ISSET(dh, WT_DHANDLE_DISAGG_META)

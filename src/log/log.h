@@ -45,6 +45,8 @@ union __wt_lsn {
 
 #define WT_LOG_FILENAME "WiredTigerLog" /* Log file name */
 
+#define WT_MAX_LSN_STRING 32
+
 /*
  * Atomically set the LSN. There are two forms. We need WT_ASSIGN_LSN because some compilers (at
  * least clang address sanitizer) does not do atomic 64-bit structure assignment so we need to
@@ -133,8 +135,9 @@ struct __wt_log_thread {
 };
 
 struct __wt_log_manager {
+    WT_RWLOCK debug_log_retention_lock; /* Log retention reconfiguration lock */
 
-    WT_LOG *log; /* Logging structure */
+    WTI_LOG *log; /* Logging structure */
 
     WT_COMPRESSOR *compressor; /* configuration : Logging compressor */
 
@@ -323,7 +326,7 @@ extern void __wt_logmgr_compat_version(WT_SESSION_IMPL *session);
 extern void __wt_logrec_free(WT_SESSION_IMPL *session, WT_ITEM **logrecp);
 static WT_INLINE int __wt_log_cmp(WT_LSN *lsn1, WT_LSN *lsn2)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
-static WT_INLINE int __wt_lsn_string(WT_SESSION_IMPL *session, WT_LSN *lsn, WT_ITEM *buf)
+static WT_INLINE int __wt_lsn_string(WT_LSN *lsn, size_t len, char *buf)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
 static WT_INLINE uint32_t __wt_lsn_file(WT_LSN *lsn)
   WT_GCC_FUNC_DECL_ATTRIBUTE((warn_unused_result));
