@@ -13,6 +13,7 @@ set(default_enable_tcmalloc ${HAVE_LIBTCMALLOC})
 set(default_enable_debug_info ON)
 set(default_enable_static OFF)
 set(default_enable_shared ON)
+set(default_enable_cpp_compile ON)
 
 if("${CMAKE_BUILD_TYPE}" MATCHES "^(Release|RelWithDebInfo)$")
     set(default_have_diagnostics OFF)
@@ -174,6 +175,12 @@ config_bool(
     ENABLE_PYTHON
     "Configure the python API"
     DEFAULT ${default_enable_python}
+)
+
+config_bool(
+    USE_CPP_FOR_C_FILES
+    "Configure to compile as C++"
+    DEFAULT ${default_enable_cpp_compile}
 )
 
 config_string(
