@@ -273,6 +273,17 @@ struct __wt_bm {
 };
 
 /*
+ * Live checkpoint status (for WT_BLOCK.ckpt_state). Defined at file scope so enumerators
+ * are visible in both C and C++ (C++ keeps enum values in the enum's scope when inside a struct).
+ */
+typedef enum {
+    WT_CKPT_NONE = 0,
+    WT_CKPT_INPROGRESS,
+    WT_CKPT_PANIC_ON_FAILURE,
+    WT_CKPT_SALVAGE
+} wt_ckpt_state;
+
+/*
  * WT_BLOCK --
  *	Block manager file handle.
  */
@@ -310,12 +321,7 @@ struct __wt_block {
     WT_SPINLOCK live_lock; /* Live checkpoint lock */
     WT_BLOCK_CKPT live;    /* Live checkpoint */
     bool live_open;        /* Live system is open */
-    enum {                 /* Live checkpoint status */
-        WT_CKPT_NONE = 0,
-        WT_CKPT_INPROGRESS,
-        WT_CKPT_PANIC_ON_FAILURE,
-        WT_CKPT_SALVAGE
-    } ckpt_state;
+    wt_ckpt_state ckpt_state;
 
     WT_CKPT *final_ckpt; /* Final live checkpoint write */
 
@@ -439,7 +445,7 @@ struct __wt_block_header {
  *	The first usable data byte on the block (past the combined headers).
  */
 #define WT_BLOCK_HEADER_BYTE_SIZE (WT_PAGE_HEADER_SIZE + WT_BLOCK_HEADER_SIZE)
-#define WT_BLOCK_HEADER_BYTE(dsk) ((void *)((uint8_t *)(dsk) + WT_BLOCK_HEADER_BYTE_SIZE))
+#define WT_BLOCK_HEADER_BYTE(dsk) ((uint8_t *)((uint8_t *)(dsk) + WT_BLOCK_HEADER_BYTE_SIZE))
 
 /*
  * We don't compress or encrypt the block's WT_PAGE_HEADER or WT_BLOCK_HEADER structures because we

@@ -179,7 +179,7 @@ __split_ovfl_key_cleanup(WT_SESSION_IMPL *session, WT_PAGE *page, WT_REF *ref)
     /* Leak blocks rather than try this twice. */
     ikey->cell_offset = 0;
 
-    cell = WT_PAGE_REF_OFFSET(page, cell_offset);
+    cell = (WT_CELL *)WT_PAGE_REF_OFFSET(page, cell_offset);
     __wt_cell_unpack_kv(session, page->dsk, cell, &kpack);
     if (FLD_ISSET(kpack.flags, WT_CELL_UNPACK_OVERFLOW) && kpack.raw != WT_CELL_KEY_OVFL_RM)
         WT_RET(__wt_ovfl_discard(session, page, cell));
@@ -2428,7 +2428,7 @@ __wt_split_rewrite(WT_SESSION_IMPL *session, WT_REF *ref, WT_MULTI *multi, bool 
     WT_ADDR *addr;
     WT_DECL_RET;
     WT_PAGE *page;
-    WT_REF *new;
+    WT_REF *new_ref;
 
     page = ref->page;
     addr = NULL;
@@ -2451,10 +2451,10 @@ __wt_split_rewrite(WT_SESSION_IMPL *session, WT_REF *ref, WT_MULTI *multi, bool 
      * Allocate a WT_REF, the error path calls routines that free memory. The only field we need to
      * set is the record number, as it's used by the search routines.
      */
-    WT_RET(__wt_calloc_one(session, &new));
-    new->ref_recno = ref->ref_recno;
+    WT_RET(__wt_calloc_one(session, &new_ref));
+    new_ref->ref_recno = ref->ref_recno;
 
-    WT_ERR(__split_multi_inmem(session, page, multi, new));
+    WT_ERR(__split_multi_inmem(session, page, multi, new_ref));
 
     /*
      * The rewrite succeeded, we can no longer fail.
@@ -2494,16 +2494,16 @@ __wt_split_rewrite(WT_SESSION_IMPL *session, WT_REF *ref, WT_MULTI *multi, bool 
     /* Swap the new page into place. */
     if (WT_DELTA_INT_ENABLED(S2BT(session), S2C(session)))
         __wt_atomic_store_uint8_v_release(&ref->rec_state, WT_REF_REC_DIRTY);
-    ref->page = new->page;
+    ref->page = new_ref->page;
 
     if (change_ref_state)
         WT_REF_SET_STATE(ref, WT_REF_MEM);
 
-    __wt_free(session, new);
+    __wt_free(session, new_ref);
     return (0);
 
 err:
     __wt_free(session, addr);
-    __split_multi_inmem_fail(session, page, multi, new);
+    __split_multi_inmem_fail(session, page, multi, new_ref);
     return (ret);
 }

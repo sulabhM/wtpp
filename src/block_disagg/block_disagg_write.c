@@ -105,7 +105,7 @@ __wti_block_disagg_write_internal(WT_SESSION_IMPL *session, WT_BLOCK_DISAGG *blo
     /*
      * Clear the block header to ensure all of it is initialized, even the unused fields.
      */
-    blk = WT_BLOCK_HEADER_REF(buf->mem);
+    blk = (WT_BLOCK_DISAGG_HEADER *)WT_BLOCK_HEADER_REF(buf->mem);
     memset(blk, 0, sizeof(*blk));
 
     if (buf->size > UINT32_MAX) {
@@ -244,12 +244,12 @@ __wti_block_disagg_write(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf
      * place to catch all callers. After the write, swap values back to native order so callers
      * never see anything other than their original content.
      */
-    __wt_page_header_byteswap(buf->mem);
+    __wt_page_header_byteswap((WT_PAGE_HEADER *)buf->mem);
 
     WT_RET(__wti_block_disagg_write_internal(session, block_disagg, buf, block_meta,
       page_image_size, &size, &checksum, data_checksum, checkpoint_io));
 
-    __wt_page_header_byteswap(buf->mem);
+    __wt_page_header_byteswap((WT_PAGE_HEADER *)buf->mem);
 
     WT_CLEAR(cookie);
     cookie.page_id = block_meta->page_id;

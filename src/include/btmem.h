@@ -114,7 +114,7 @@ __wt_page_header_byteswap(WT_PAGE_HEADER *dsk)
 /*
  * The block-manager specific information immediately follows the WT_PAGE_HEADER structure.
  */
-#define WT_BLOCK_HEADER_REF(dsk) ((void *)((uint8_t *)(dsk) + WT_PAGE_HEADER_SIZE))
+#define WT_BLOCK_HEADER_REF(dsk) ((WT_BLOCK_HEADER *)((uint8_t *)(dsk) + WT_PAGE_HEADER_SIZE))
 
 /*
  * WT_PAGE_HEADER_BYTE --
@@ -1427,7 +1427,7 @@ struct __wt_col {
  *	Return/Set a pointer corresponding to the data offset. (If the item does
  * not exist on the page, return a NULL.)
  */
-#define WT_COL_PTR(page, cip) WT_PAGE_REF_OFFSET(page, (cip)->__col_value)
+#define WT_COL_PTR(page, cip) ((WT_CELL *)WT_PAGE_REF_OFFSET(page, (cip)->__col_value))
 #define WT_COL_PTR_SET(cip, value) (cip)->__col_value = (value)
 
 /*

@@ -125,7 +125,7 @@ __wt_curstat_table_init(
     WT_CURSOR *stat_cursor;
     WT_DECL_ITEM(buf);
     WT_DECL_RET;
-    WT_DSRC_STATS *new, *stats;
+    WT_DSRC_STATS *new_stats, *stats;
     WT_TABLE *table;
     u_int i;
     const char *name;
@@ -170,11 +170,11 @@ __wt_curstat_table_init(
     for (i = 0; i < WT_COLGROUPS(table); i++) {
         WT_ERR(__wt_buf_fmt(session, buf, "statistics:%s", table->cgroups[i]->name));
         WT_ERR(__wt_curstat_open(session, buf->data, cfg, &stat_cursor));
-        new = (WT_DSRC_STATS *)WT_CURSOR_STATS(stat_cursor);
+        new_stats = (WT_DSRC_STATS *)WT_CURSOR_STATS(stat_cursor);
         if (i == 0)
-            *stats = *new;
+            *stats = *new_stats;
         else
-            __wt_stat_dsrc_aggregate_single(new, stats);
+            __wt_stat_dsrc_aggregate_single(new_stats, stats);
         WT_ERR(stat_cursor->close(stat_cursor));
     }
 
@@ -183,8 +183,8 @@ __wt_curstat_table_init(
     for (i = 0; i < table->nindices; i++) {
         WT_ERR(__wt_buf_fmt(session, buf, "statistics:%s", table->indices[i]->name));
         WT_ERR(__wt_curstat_open(session, buf->data, cfg, &stat_cursor));
-        new = (WT_DSRC_STATS *)WT_CURSOR_STATS(stat_cursor);
-        __wt_stat_dsrc_aggregate_single(new, stats);
+        new_stats = (WT_DSRC_STATS *)WT_CURSOR_STATS(stat_cursor);
+        __wt_stat_dsrc_aggregate_single(new_stats, stats);
         WT_ERR(stat_cursor->close(stat_cursor));
     }
 

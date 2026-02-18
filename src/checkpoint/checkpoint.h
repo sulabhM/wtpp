@@ -10,6 +10,20 @@
 
 #include "checkpoint_private.h"
 /*
+ * Checkpoint crash trigger points (file scope for C++ compatibility).
+ */
+typedef enum {
+    CKPT_CRASH_NONE = 0,
+    CKPT_CRASH_BEFORE_METADATA_SYNC,
+    CKPT_CRASH_BEFORE_METADATA_UPDATE,
+    CKPT_CRASH_PROGRESS_ENUM_END,
+    KEY_PROVIDER_CRASH_BEFORE_KEY_ROTATION,
+    KEY_PROVIDER_CRASH_DURING_KEY_ROTATION,
+    KEY_PROVIDER_CRASH_AFTER_KEY_ROTATION,
+    CKPT_CRASH_ENUM_END,
+} wt_ckpt_crash_state;
+
+/*
  * WT_CKPT_SESSION --
  *     Per-session checkpoint information.
  */
@@ -25,16 +39,7 @@ struct __wt_ckpt_session {
     u_int crash_point;
     /* Crash at a specific point in checkpoint. */
     u_int crash_trigger_point;
-    enum {
-        CKPT_CRASH_NONE = 0,
-        CKPT_CRASH_BEFORE_METADATA_SYNC,
-        CKPT_CRASH_BEFORE_METADATA_UPDATE,
-        CKPT_CRASH_PROGRESS_ENUM_END,
-        KEY_PROVIDER_CRASH_BEFORE_KEY_ROTATION,
-        KEY_PROVIDER_CRASH_DURING_KEY_ROTATION,
-        KEY_PROVIDER_CRASH_AFTER_KEY_ROTATION,
-        CKPT_CRASH_ENUM_END,
-    } ckpt_crash_state;
+    wt_ckpt_crash_state ckpt_crash_state;
 
     /* Named checkpoint drop list, during a checkpoint */
     WT_ITEM *drop_list;

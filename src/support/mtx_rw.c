@@ -124,7 +124,7 @@ __wt_rwlock_destroy(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 int
 __wt_try_readlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
     int64_t **stats;
 
     WT_STAT_CONN_INCR(session, rwlock_read);
@@ -133,22 +133,22 @@ __wt_try_readlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
         __wt_atomic_add_int64_relaxed(&stats[session->stat_conn_bucket][l->stat_read_count_off], 1);
     }
 
-    old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+    old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
 
     /* This read lock can only be granted if there are no active writers. */
-    if (old.u.s.current != old.u.s.next)
+    if (old_lock.u.s.current != old_lock.u.s.next)
         return (__wt_set_return(session, EBUSY));
 
     /*
      * The replacement lock value is a result of adding an active reader. Check for overflow: if the
      * maximum number of readers are already active, no new readers can enter the lock.
      */
-    new.u.v = old.u.v;
-    if (++new.u.s.readers_active == 0)
+    new_lock.u.v = old_lock.u.v;
+    if (++new_lock.u.s.readers_active == 0)
         return (__wt_set_return(session, EBUSY));
 
     /* We rely on this atomic operation to provide a barrier. */
-    WT_RET(__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v) ? 0 : EBUSY);
+    WT_RET(__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v) ? 0 : EBUSY);
 
 #ifdef TSAN_BUILD
     /* Perform a dummy read to inform TSan this function does in fact have acquire semantics. */
@@ -176,7 +176,7 @@ __read_blocked(WT_SESSION_IMPL *session)
 void
 __wt_readlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
     uint64_t time_diff, time_start, time_stop;
     int64_t *session_stats, **stats;
     int16_t writers_active;
@@ -191,16 +191,16 @@ __wt_readlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
         /*
          * Fast path: if there is no active writer, join the current group.
          */
-        for (old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v); old.u.s.current == old.u.s.next;
-             old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v)) {
-            new.u.v = old.u.v;
+        for (old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v); old_lock.u.s.current == old_lock.u.s.next;
+             old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v)) {
+            new_lock.u.v = old_lock.u.v;
             /*
              * Check for overflow: if the maximum number of readers are already active, no new
              * readers can enter the lock.
              */
-            if (++new.u.s.readers_active == 0)
+            if (++new_lock.u.s.readers_active == 0)
                 goto stall;
-            if (__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v))
+            if (__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v))
                 return;
             WT_PAUSE();
         }
@@ -217,8 +217,8 @@ __wt_readlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
          * If the maximum allowed number of readers are already queued or there is a
          * potential overflow, wait until we can get a valid ticket.
          */
-        writers_active = old.u.s.next - old.u.s.current;
-        if (old.u.s.readers_queued == UINT8_MAX || old.u.s.readers_queued > writers_active) {
+        writers_active = old_lock.u.s.next - old_lock.u.s.current;
+        if (old_lock.u.s.readers_queued == UINT8_MAX || old_lock.u.s.readers_queued > writers_active) {
 stall:
             __wt_cond_wait(session, l->cond_readers, 10 * WT_THOUSAND, NULL);
             continue;
@@ -228,12 +228,12 @@ stall:
          * If we are the first reader to queue, set the next read group. Note: don't re-read from
          * the lock or we could race with a writer unlocking.
          */
-        new.u.v = old.u.v;
-        if (new.u.s.readers_queued++ == 0)
-            new.u.s.reader = new.u.s.next;
-        ticket = new.u.s.reader;
-        WT_ASSERT(session, new.u.s.readers_queued != 0);
-        if (__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v))
+        new_lock.u.v = old_lock.u.v;
+        if (new_lock.u.s.readers_queued++ == 0)
+            new_lock.u.s.reader = new_lock.u.s.next;
+        ticket = new_lock.u.s.reader;
+        WT_ASSERT(session, new_lock.u.s.readers_queued != 0);
+        if (__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v))
             break;
     }
 
@@ -299,7 +299,7 @@ stall:
 void
 __wt_readunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
 
 #ifdef TSAN_BUILD
     /* Perform a dummy write to inform TSan this function does in fact have release semantics. */
@@ -307,18 +307,18 @@ __wt_readunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 #endif
 
     do {
-        old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
-        WT_ASSERT(session, old.u.s.readers_active > 0);
+        old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+        WT_ASSERT(session, old_lock.u.s.readers_active > 0);
 
         /*
          * Decrement the active reader count (other readers are doing the same, make sure we don't
          * race).
          */
-        new.u.v = old.u.v;
-        --new.u.s.readers_active;
-    } while (!__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v));
+        new_lock.u.v = old_lock.u.v;
+        --new_lock.u.s.readers_active;
+    } while (!__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v));
 
-    if (new.u.s.readers_active == 0 && new.u.s.current != new.u.s.next)
+    if (new_lock.u.s.readers_active == 0 && new_lock.u.s.current != new_lock.u.s.next)
         __wt_cond_signal(session, l->cond_writers);
 }
 
@@ -329,7 +329,7 @@ __wt_readunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 int
 __wt_try_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
     int64_t **stats;
 
     WT_STAT_CONN_INCR(session, rwlock_write);
@@ -344,24 +344,24 @@ __wt_try_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
      * this thread's ticket would be the next ticket granted. Check if this can possibly succeed
      * (and confirm the lock is in the correct state to grant this write lock).
      */
-    old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
-    if (old.u.s.current != old.u.s.next || old.u.s.readers_active != 0)
+    old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+    if (old_lock.u.s.current != old_lock.u.s.next || old_lock.u.s.readers_active != 0)
         return (__wt_set_return(session, EBUSY));
 
     /*
      * We've checked above that there is no writer active (since
      * `current == next`), so there should be no readers queued.
      */
-    WT_ASSERT(session, old.u.s.readers_queued == 0);
+    WT_ASSERT(session, old_lock.u.s.readers_queued == 0);
 
     /*
      * The replacement lock value is a result of allocating a new ticket.
      *
      * We rely on this atomic operation to provide a barrier.
      */
-    new.u.v = old.u.v;
-    new.u.s.next++;
-    WT_RET(__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v) ? 0 : EBUSY);
+    new_lock.u.v = old_lock.u.v;
+    new_lock.u.s.next++;
+    WT_RET(__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v) ? 0 : EBUSY);
 
 #ifdef TSAN_BUILD
     /* Perform a dummy write to inform TSan this function does in fact have acquire semantics. */
@@ -392,7 +392,7 @@ __write_blocked(WT_SESSION_IMPL *session)
 void
 __wt_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
     uint64_t time_diff, time_start, time_stop;
     int64_t *session_stats, **stats;
     uint8_t ticket;
@@ -401,21 +401,21 @@ __wt_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
     WT_STAT_CONN_INCR(session, rwlock_write);
 
     for (;;) {
-        old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+        old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
 
         /* Allocate a ticket. */
-        new.u.v = old.u.v;
-        ticket = new.u.s.next++;
+        new_lock.u.v = old_lock.u.v;
+        ticket = new_lock.u.s.next++;
 
         /*
          * Check for overflow: if the next ticket is allowed to catch up with the current batch, two
          * writers could be granted the lock simultaneously.
          */
-        if (new.u.s.current == new.u.s.next) {
+        if (new_lock.u.s.current == new_lock.u.s.next) {
             __wt_cond_wait(session, l->cond_writers, 10 * WT_THOUSAND, NULL);
             continue;
         }
-        if (__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v))
+        if (__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v))
             break;
     }
 
@@ -428,9 +428,9 @@ __wt_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
      */
     time_start =
       l->stat_write_count_off != -1 && WT_STAT_ENABLED(session) ? __wt_clock(session) : 0;
-    for (pause_cnt = 0, old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
-         ticket != old.u.s.current || old.u.s.readers_active != 0;
-         pause_cnt++, old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v)) {
+    for (pause_cnt = 0, old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+         ticket != old_lock.u.s.current || old_lock.u.s.readers_active != 0;
+         pause_cnt++, old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v)) {
         if (pause_cnt < WT_THOUSAND)
             WT_PAUSE();
         else if (pause_cnt < 1200)
@@ -490,7 +490,7 @@ __wt_writelock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 void
 __wt_writeunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 {
-    WT_RWLOCK new, old;
+    WT_RWLOCK new_lock, old_lock;
 
 #ifdef TSAN_BUILD
     /* Perform a dummy write to inform TSan this function does in fact have release semantics. */
@@ -498,12 +498,12 @@ __wt_writeunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
 #endif
 
     do {
-        old.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
+        old_lock.u.v = __wt_atomic_load_uint64_v_relaxed(&l->u.v);
 
         /*
          * We're holding the lock exclusive, there shouldn't be any active readers.
          */
-        WT_ASSERT(session, old.u.s.readers_active == 0);
+        WT_ASSERT(session, old_lock.u.s.readers_active == 0);
 
         /*
          * Allow the next batch to start.
@@ -511,16 +511,16 @@ __wt_writeunlock(WT_SESSION_IMPL *session, WT_RWLOCK *l)
          * If there are readers in the next group, swap queued readers to active: this could race
          * with new readlock requests, so we have to spin.
          */
-        new.u.v = old.u.v;
-        if (++new.u.s.current == new.u.s.reader) {
-            new.u.s.readers_active = new.u.s.readers_queued;
-            new.u.s.readers_queued = 0;
+        new_lock.u.v = old_lock.u.v;
+        if (++new_lock.u.s.current == new_lock.u.s.reader) {
+            new_lock.u.s.readers_active = new_lock.u.s.readers_queued;
+            new_lock.u.s.readers_queued = 0;
         }
-    } while (!__wt_atomic_cas_uint64_v(&l->u.v, old.u.v, new.u.v));
+    } while (!__wt_atomic_cas_uint64_v(&l->u.v, old_lock.u.v, new_lock.u.v));
 
-    if (new.u.s.readers_active != 0)
+    if (new_lock.u.s.readers_active != 0)
         __wt_cond_signal(session, l->cond_readers);
-    else if (new.u.s.current != new.u.s.next)
+    else if (new_lock.u.s.current != new_lock.u.s.next)
         __wt_cond_signal(session, l->cond_writers);
 
     WT_DIAGNOSTIC_YIELD;

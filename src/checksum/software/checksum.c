@@ -566,6 +566,9 @@ static const uint32_t g_crc_slicing[8][256] = {
 #endif
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 extern uint32_t __wt_checksum_sw(const void *chunk, size_t len);
 extern uint32_t __wt_checksum_with_seed_sw(uint32_t, const void *chunk, size_t len);
 
@@ -635,3 +638,6 @@ __wt_checksum_sw(const void *chunk, size_t len)
 {
     return (__wt_checksum_with_seed_sw(0, chunk, len));
 }
+#ifdef __cplusplus
+}
+#endif

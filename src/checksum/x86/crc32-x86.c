@@ -134,6 +134,10 @@ __checksum_hw(const void *chunk, size_t len)
 
 extern uint32_t __wt_checksum_sw(const void *chunk, size_t len);
 extern uint32_t __wt_checksum_with_seed_sw(uint32_t, const void *chunk, size_t len);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #if defined(__GNUC__)
 extern uint32_t (*wiredtiger_crc32c_func(void))(const void *, size_t)
   __attribute__((visibility("default")));
@@ -236,3 +240,6 @@ uint32_t (*wiredtiger_crc32c_with_seed_func(void))(uint32_t, const void *, size_
     return (crc32c_func = __wt_checksum_with_seed_sw);
 #endif
 }
+#ifdef __cplusplus
+}
+#endif

@@ -39,6 +39,9 @@ extern uint32_t (*wiredtiger_crc32c_func(void))(const void *, size_t);
 extern uint32_t (*wiredtiger_crc32c_with_seed_func(void))(uint32_t, const void *, size_t);
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 /*
  * wiredtiger_crc32c_func --
  *     WiredTiger: detect CRC hardware and return the checksum function.
@@ -65,3 +68,6 @@ uint32_t (*wiredtiger_crc32c_with_seed_func(void))(uint32_t, const void *, size_
     return (__wt_checksum_with_seed_sw);
 #endif
 }
+#ifdef __cplusplus
+}
+#endif

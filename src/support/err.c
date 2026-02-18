@@ -43,6 +43,8 @@ typedef struct __wt_error_log {
  */
 #ifdef _WIN32
 __declspec(thread) static WT_ERROR_LOG error_log = {0};
+#elif defined(__cplusplus)
+thread_local static WT_ERROR_LOG error_log = {0};
 #else
 _Thread_local static WT_ERROR_LOG error_log = {0};
 #endif

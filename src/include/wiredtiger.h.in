@@ -3975,6 +3975,12 @@ struct __wt_config_item {
 #if !defined(SWIG) && !defined(DOXYGEN)
 #if defined(__cplusplus)
 typedef enum __wt_config_item::WT_CONFIG_ITEM_TYPE WT_CONFIG_ITEM_TYPE;
+/* C++: enum constants are in struct scope; provide unqualified names for compatibility. */
+#define WT_CONFIG_ITEM_STRING __wt_config_item::WT_CONFIG_ITEM_STRING
+#define WT_CONFIG_ITEM_BOOL   __wt_config_item::WT_CONFIG_ITEM_BOOL
+#define WT_CONFIG_ITEM_ID     __wt_config_item::WT_CONFIG_ITEM_ID
+#define WT_CONFIG_ITEM_NUM    __wt_config_item::WT_CONFIG_ITEM_NUM
+#define WT_CONFIG_ITEM_STRUCT __wt_config_item::WT_CONFIG_ITEM_STRUCT
 #else
 typedef enum WT_CONFIG_ITEM_TYPE WT_CONFIG_ITEM_TYPE;
 #endif

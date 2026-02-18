@@ -113,6 +113,37 @@ typedef TAILQ_HEAD(__wt_cursor_list, __wt_cursor) WT_CURSOR_LIST;
 #define WT_SESSION_ID_NULL 0xfffffffe
 
 /*
+ * Session compaction state. Defined at file scope so enumerators are visible in both C and C++.
+ */
+typedef enum {
+    WT_COMPACT_NONE = 0,
+    WT_COMPACT_RUNNING,
+    WT_COMPACT_SUCCESS
+} wt_compact_state;
+
+/*
+ * Session stash (file scope for C++ compatibility).
+ */
+struct __wt_stash {
+    void *p;     /* Memory, length */
+    size_t len;
+    uint64_t gen; /* Generation */
+};
+
+struct __wt_session_stash {
+    struct __wt_stash *list;
+    size_t cnt;   /* Array entries */
+    size_t alloc; /* Allocated bytes */
+};
+
+#ifdef HAVE_DIAGNOSTIC
+struct __wt_scratch_track {
+    const char *func; /* Allocating function, line */
+    int line;
+};
+#endif
+
+/*
  * WT_SESSION_IMPL --
  *	Implementation of WT_SESSION.
  */
@@ -168,7 +199,7 @@ struct __wt_session_impl {
     WT_CURSOR_BACKUP *bkp_cursor; /* Hot backup cursor */
 
     WT_COMPACT_STATE *compact; /* Compaction information */
-    enum { WT_COMPACT_NONE = 0, WT_COMPACT_RUNNING, WT_COMPACT_SUCCESS } compact_state;
+    wt_compact_state compact_state;
 
     WT_IMPORT_LIST *import_list; /* List of metadata entries to import from file. */
 
@@ -205,10 +236,7 @@ struct __wt_session_impl {
      * mode we track them; DIAGNOSTIC can't simply add additional fields to WT_ITEM structures
      * because they are visible to applications, create a parallel structure instead.
      */
-    struct __wt_scratch_track {
-        const char *func; /* Allocating function, line */
-        int line;
-    } * scratch_track;
+    struct __wt_scratch_track *scratch_track;
 #endif
 
     /* Record the important timestamps of each stage in an reconciliation. */
@@ -392,15 +420,7 @@ struct __wt_session_impl {
      * memory that's still in use. In order to eventually free it, it's stashed here with its
      * generation number; when no thread is reading in generation, the memory can be freed for real.
      */
-    struct __wt_session_stash {
-        struct __wt_stash {
-            void *p; /* Memory, length */
-            size_t len;
-            uint64_t gen; /* Generation */
-        } * list;
-        size_t cnt;   /* Array entries */
-        size_t alloc; /* Allocated bytes */
-    } stash[WT_GENERATIONS];
+    struct __wt_session_stash stash[WT_GENERATIONS];
 
 /*
  * Hazard pointers.

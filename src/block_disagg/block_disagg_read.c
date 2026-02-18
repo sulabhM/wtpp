@@ -192,7 +192,7 @@ __block_disagg_read_multiple(WT_SESSION_IMPL *session, WT_BLOCK_DISAGG *block_di
         /*
          * Do little- to big-endian handling early on.
          */
-        blk = WT_BLOCK_HEADER_REF(current->data);
+        blk = (WT_BLOCK_DISAGG_HEADER *)WT_BLOCK_HEADER_REF(current->data);
         __wti_block_disagg_header_byteswap_copy(blk, &swap);
 
         if (swap.checksum == checksum) {
@@ -245,7 +245,7 @@ __block_disagg_read_multiple(WT_SESSION_IMPL *session, WT_BLOCK_DISAGG *block_di
                  * Swap the page-header as needed; this doesn't belong here, but it's the best place
                  * to catch all callers.
                  */
-                __wt_page_header_byteswap((void *)current->data);
+                __wt_page_header_byteswap((WT_PAGE_HEADER *)current->data);
                 checksum = swap.previous_checksum;
                 continue;
             }

@@ -1289,7 +1289,7 @@ __wti_block_extlist_write(
     size = ((size_t)entries + 2) * 2 * WT_INTPACK64_MAXSIZE;
     WT_RET(__wt_block_write_size(session, block, &size));
     WT_RET(__wt_scr_alloc(session, size, &tmp));
-    dsk = tmp->mem;
+    dsk = (WT_PAGE_HEADER *)tmp->mem;
     memset(dsk, 0, WT_BLOCK_HEADER_BYTE_SIZE);
     dsk->type = WT_PAGE_BLOCK_MANAGER;
     dsk->version = WT_PAGE_VERSION_TS;

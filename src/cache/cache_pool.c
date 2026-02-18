@@ -9,6 +9,15 @@
 #include "wt_internal.h"
 
 /*
+ * TAILQ head type for cache_pool_qh: in C++ the struct is nested in __wt_cache_pool.
+ */
+#ifdef __cplusplus
+#define WT_CP_QH __wt_cache_pool::__wt_cache_pool_qh
+#else
+#define WT_CP_QH __wt_cache_pool_qh
+#endif
+
+/*
  * Tuning constants.
  */
 /*
@@ -648,9 +657,9 @@ __cache_pool_adjust(WT_SESSION_IMPL *session, uint64_t highest, uint64_t bump_th
     }
 
     for (entry = forward ? TAILQ_FIRST(&cp->cache_pool_qh) :
-                           TAILQ_LAST(&cp->cache_pool_qh, __wt_cache_pool_qh);
+                           TAILQ_LAST(&cp->cache_pool_qh, WT_CP_QH);
          entry != NULL;
-         entry = forward ? TAILQ_NEXT(entry, cpq) : TAILQ_PREV(entry, __wt_cache_pool_qh, cpq)) {
+         entry = forward ? TAILQ_NEXT(entry, cpq) : TAILQ_PREV(entry, WT_CP_QH, cpq)) {
         cache = entry->cache;
         evict = entry->evict;
         reserved = cache->cp_reserved;

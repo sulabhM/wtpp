@@ -285,7 +285,7 @@ __wti_block_read_off(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf, ui
                  * Swap the page-header as needed; this doesn't belong here, but it's the best place
                  * to catch all callers.
                  */
-                __wt_page_header_byteswap(buf->mem);
+                __wt_page_header_byteswap((WT_PAGE_HEADER *)buf->mem);
                 return (0);
             }
             full_checksum_mismatch = true;

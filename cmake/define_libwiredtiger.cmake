@@ -36,6 +36,10 @@ macro(define_wiredtiger_library target type)
         if(COMPILER_DIAGNOSTIC_CXX_FLAGS)
             target_compile_options(${target} PRIVATE ${COMPILER_DIAGNOSTIC_CXX_FLAGS})
         endif()
+        # Allow implicit void* to pointer conversions (C code compiled as C++).
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(${target} PRIVATE -fpermissive -Wno-error)
+        endif()
     else()
         # Append any provided C flags.
         if(COMPILER_DIAGNOSTIC_C_FLAGS)

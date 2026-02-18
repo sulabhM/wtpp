@@ -162,12 +162,12 @@ __config_merge_scan(
              * check the latter to handle cases such as "log=(enabled)", which does not contain '='
              * in its value.
              */
-            if (strchr(vb->data, '=') != NULL)
+            if (strchr((const char *)vb->data, '=') != NULL)
                 is_struct = true;
             else {
                 is_struct = false;
                 for (i = 0; i < cp->entries_next; i++) {
-                    if (strncmp(cp->entries[i].k, kb->data, kb->size) == 0 &&
+                    if (strncmp(cp->entries[i].k, (const char *)kb->data, kb->size) == 0 &&
                       strncmp(cp->entries[i].k + kb->size, SEP, strlen(SEP)) == 0) {
                         is_struct = true;
                         break;
@@ -176,7 +176,8 @@ __config_merge_scan(
             }
 
             if (is_struct) {
-                WT_ERR(__config_merge_scan(session, kb->data, vb->data, strip, cp));
+                WT_ERR(__config_merge_scan(session, (const char *)kb->data, (const char *)vb->data,
+                  strip, cp));
                 continue;
             }
         }
@@ -268,7 +269,7 @@ __config_merge_format_next(WT_SESSION_IMPL *session, const char *prefix, size_t 
             /*
              * It's possible the level contained nothing, check and discard empty levels.
              */
-            p = build->data;
+            p = (const char *)build->data;
             if (p[build->size - 3] == '(')
                 build->size = saved_len;
 

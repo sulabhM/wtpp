@@ -113,6 +113,15 @@ struct __wt_cursor_prepare_discovered {
     size_t list_next;
 };
 
+/*
+ * Cursor next/prev retry state. Defined at file scope so enumerators are visible in both C and C++.
+ */
+typedef enum {
+    WT_CBT_RETRY_NOTSET = 0,
+    WT_CBT_RETRY_INSERT,
+    WT_CBT_RETRY_PAGE
+} wt_cbt_retry_state;
+
 struct __wt_cursor_btree {
     WT_CURSOR iface;
 
@@ -246,7 +255,7 @@ struct __wt_cursor_btree {
      * We have to restart cursor next/prev after a prepare conflict. Keep the state of the cursor
      * separately so we can restart at exactly the right point.
      */
-    enum { WT_CBT_RETRY_NOTSET = 0, WT_CBT_RETRY_INSERT, WT_CBT_RETRY_PAGE } iter_retry;
+    wt_cbt_retry_state iter_retry;
 
     /*
      * The random number state is used for random cursor operations. The random number can be seeded

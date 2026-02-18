@@ -8,10 +8,23 @@
 
 #include "wt_internal.h"
 
+/* C++: use named arrays (no compound literal address). */
+#ifdef __cplusplus
+static const WT_VERBOSE_CATEGORY txn_recover_verbose_all[] =
+  {WT_VERB_RECOVERY, WT_VERB_RECOVERY_PROGRESS};
+static const WT_VERBOSE_CATEGORY txn_recover_verbose_all_rts[] =
+  {WT_VERB_RECOVERY, WT_VERB_RECOVERY_PROGRESS, WT_VERB_RTS};
+#define WT_VERB_RECOVERY_ALL WT_DECL_VERBOSE_MULTI_CATEGORY(txn_recover_verbose_all)
+#define WT_VERB_RECOVERY_ALL_RTS WT_DECL_VERBOSE_MULTI_CATEGORY(txn_recover_verbose_all_rts)
+#else
 /* Enable all recovery-related verbose messaging events. */
 #define WT_VERB_RECOVERY_ALL        \
     WT_DECL_VERBOSE_MULTI_CATEGORY( \
       ((WT_VERBOSE_CATEGORY[]){WT_VERB_RECOVERY, WT_VERB_RECOVERY_PROGRESS}))
+#define WT_VERB_RECOVERY_ALL_RTS \
+    WT_DECL_VERBOSE_MULTI_CATEGORY( \
+      ((WT_VERBOSE_CATEGORY[]){WT_VERB_RECOVERY, WT_VERB_RECOVERY_PROGRESS, WT_VERB_RTS}))
+#endif
 
 /* State maintained during recovery. */
 typedef struct {
@@ -1285,8 +1298,7 @@ done:
         }
 
         __wt_verbose_level_multi(session,
-          WT_DECL_VERBOSE_MULTI_CATEGORY(
-            ((WT_VERBOSE_CATEGORY[]){WT_VERB_RECOVERY, WT_VERB_RECOVERY_PROGRESS, WT_VERB_RTS})),
+          WT_VERB_RECOVERY_ALL_RTS,
           WT_VERBOSE_INFO,
           "[RECOVERY_RTS] performing recovery rollback_to_stable with stable_timestamp=%s and "
           "oldest_timestamp=%s",

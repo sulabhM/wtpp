@@ -10,20 +10,25 @@
 
 #undef WT_ENABLE_SCHEMA_TXN
 /*
+ * Meta track operation type (file scope for C++ compatibility).
+ */
+typedef enum {
+    WT_ST_EMPTY = 0,          /* Unused slot */
+    WT_ST_CHECKPOINT,         /* Complete a checkpoint */
+    WT_ST_DROP_COMMIT,        /* Drop post commit */
+    WT_ST_DROP_OBJECT_COMMIT, /* Drop an object post commit */
+    WT_ST_FILEOP,             /* File operation */
+    WT_ST_LOCK,               /* Lock a handle */
+    WT_ST_REMOVE,             /* Remove a metadata entry */
+    WT_ST_SET                 /* Reset a metadata entry */
+} wt_meta_track_op;
+
+/*
  * WT_META_TRACK -- A tracked metadata operation: a non-transactional log, maintained to make it
  * easy to unroll simple metadata and filesystem operations.
  */
 typedef struct __wt_meta_track {
-    enum {
-        WT_ST_EMPTY = 0,          /* Unused slot */
-        WT_ST_CHECKPOINT,         /* Complete a checkpoint */
-        WT_ST_DROP_COMMIT,        /* Drop post commit */
-        WT_ST_DROP_OBJECT_COMMIT, /* Drop an object post commit */
-        WT_ST_FILEOP,             /* File operation */
-        WT_ST_LOCK,               /* Lock a handle */
-        WT_ST_REMOVE,             /* Remove a metadata entry */
-        WT_ST_SET                 /* Reset a metadata entry */
-    } op;
+    wt_meta_track_op op;
     char *a, *b;                 /* Strings */
     WT_BUCKET_STORAGE *bstorage; /* Bucket */
     WT_DATA_HANDLE *dhandle;     /* Locked handle */

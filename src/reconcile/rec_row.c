@@ -601,7 +601,7 @@ __wti_rec_row_int(WT_SESSION_IMPL *session, WTI_RECONCILE *r, WT_PAGE *page)
         cell = NULL;
         ikey = __wt_ref_key_instantiated(ref);
         if (ikey != NULL && ikey->cell_offset != 0) {
-            cell = WT_PAGE_REF_OFFSET(page, ikey->cell_offset);
+            cell = (WT_CELL *)WT_PAGE_REF_OFFSET(page, ikey->cell_offset);
             __wt_cell_unpack_addr(session, page->dsk, cell, kpack);
 
             /*

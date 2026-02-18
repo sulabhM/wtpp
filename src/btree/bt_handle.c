@@ -68,7 +68,7 @@ __btree_pin_hs_dhandle(WT_SESSION_IMPL *session, WT_BTREE *btree)
      * checkpoint, but without it being a traditional checkpoint cursor.
      */
     WT_ERR(__wt_buf_fmt(session, hs_uri_buf, "%s/%s", WT_HS_URI_SHARED, hs_checkpoint_name));
-    WT_ERR(__wt_session_get_dhandle(session, hs_uri_buf->data, NULL, NULL, 0));
+    WT_ERR(__wt_session_get_dhandle(session, (const char *)hs_uri_buf->data, NULL, NULL, 0));
 
     (void)__wt_atomic_add_int32(&session->dhandle->session_inuse, 1);
     WT_ERR(__wt_session_release_dhandle(session));
@@ -108,7 +108,7 @@ __wt_btree_release_hs_dhandle(WT_SESSION_IMPL *session, WT_BTREE *btree)
      * checkpoint, but without it being a traditional checkpoint cursor.
      */
     WT_ERR(__wt_buf_fmt(session, hs_uri_buf, "%s/%s", WT_HS_URI_SHARED, btree->hs_checkpoint_name));
-    WT_ERR(__wt_session_get_dhandle(session, hs_uri_buf->data, NULL, NULL, 0));
+    WT_ERR(__wt_session_get_dhandle(session, (const char *)hs_uri_buf->data, NULL, NULL, 0));
 
     (void)__wt_atomic_sub_int32(&session->dhandle->session_inuse, 1);
     WT_ERR(__wt_session_release_dhandle(session));
@@ -275,7 +275,8 @@ __wt_btree_open(WT_SESSION_IMPL *session, const char *op_cfg[])
          * checkpoint (the file is being created), or the load call returns no root page (the
          * checkpoint is for an empty file).
          */
-        WT_ERR(bm->checkpoint_load(bm, session, ckpt.raw.data, ckpt.raw.size, root_addr,
+        WT_ERR(bm->checkpoint_load(bm, session, (const uint8_t *)ckpt.raw.data, ckpt.raw.size,
+          root_addr,
           &root_addr_size, F_ISSET(btree, WT_BTREE_READONLY)));
         if (creation || root_addr_size == 0)
             WT_ERR(__btree_tree_open_empty(session, creation));
@@ -877,7 +878,7 @@ __wti_btree_tree_open(WT_SESSION_IMPL *session, const uint8_t *addr, size_t addr
 
     F_SET(session, WT_SESSION_QUIET_CORRUPT_FILE);
     if ((ret = __wt_blkcache_read(session, &dsk, &block_meta, addr, addr_size)) == 0)
-        ret = __wt_verify_dsk(session, tmp->data, &dsk);
+        ret = __wt_verify_dsk(session, (const char *)tmp->data, &dsk);
     /*
      * Flag any failed read or verification: if we're in startup, it may be fatal.
      */

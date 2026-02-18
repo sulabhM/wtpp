@@ -336,9 +336,10 @@ __ckpt_extlist_read(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_CKPT *ckpt, bo
      */
     WT_RET(__wt_calloc(session, 1, sizeof(WT_BLOCK_CKPT), &ckpt->bpriv));
 
-    ci = ckpt->bpriv;
+    ci = (WT_BLOCK_CKPT *)ckpt->bpriv;
     WT_RET(__wti_block_ckpt_init(session, ci, ckpt->name));
-    WT_RET(__wti_block_ckpt_unpack(session, block, ckpt->raw.data, ckpt->raw.size, ci));
+    WT_RET(__wti_block_ckpt_unpack(session, block, (const uint8_t *)ckpt->raw.data, ckpt->raw.size,
+      ci));
 
     /* Extent lists from non-local objects aren't useful, we're going to skip them. */
     if (ci->root_objectid != block->objectid) {
@@ -455,7 +456,7 @@ __ckpt_mod_blkmod_entry(
     WT_ASSERT(session, end_bit < blk_mod->nbits);
     /* Change all the bits needed to record this offset/length pair. */
     if (set)
-        __bit_nset(blk_mod->bitstring.mem, start_bit, end_bit);
+        __bit_nset((uint8_t *)blk_mod->bitstring.mem, start_bit, end_bit);
     else {
         /*
          * We can only clear full ranges represented by bits. Ignore any partial ranges at the
@@ -482,7 +483,7 @@ __ckpt_mod_blkmod_entry(
             end_bit = (uint64_t)(clr_off + clr_len - 1) / gran;
             WT_ASSERT(session, end_bit >= start_bit);
             WT_STAT_CONN_INCRV(session, backup_bits_clr, end_bit - start_bit + 1);
-            __bit_nclr(blk_mod->bitstring.mem, start_bit, end_bit);
+            __bit_nclr((uint8_t *)blk_mod->bitstring.mem, start_bit, end_bit);
         }
     }
     return (0);
@@ -737,13 +738,13 @@ __ckpt_process(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_CKPT *ckptbase)
          * Set the "from" checkpoint structure. If it applies to a previous object, there's nothing
          * more to do.
          */
-        a = ckpt->bpriv;
+        a = (WT_BLOCK_CKPT *)ckpt->bpriv;
         if (a->root_objectid != block->objectid)
             continue;
 
         if (WT_VERBOSE_LEVEL_ISSET(session, WT_VERB_CHECKPOINT, WT_VERBOSE_DEBUG_2))
-            __wti_ckpt_verbose(
-              session, block, "delete", ckpt->name, ckpt->raw.data, ckpt->raw.size);
+            __wti_ckpt_verbose(session, block, "delete", ckpt->name,
+              (const uint8_t *)ckpt->raw.data, ckpt->raw.size);
 
         /*
          * Find the checkpoint into which we'll roll this checkpoint's blocks: it's the next real
@@ -759,7 +760,7 @@ __ckpt_process(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_CKPT *ckptbase)
         if (F_ISSET(next_ckpt, WT_CKPT_ADD))
             b = &block->live;
         else
-            b = next_ckpt->bpriv;
+            b = (WT_BLOCK_CKPT *)next_ckpt->bpriv;
 
         /*
          * Free the root page: there's nothing special about this free, the root page is allocated
@@ -827,7 +828,7 @@ __ckpt_process(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_CKPT *ckptbase)
     /* Update checkpoints marked for update. */
     WT_CKPT_FOREACH (ckptbase, ckpt)
         if (F_ISSET(ckpt, WT_CKPT_UPDATE))
-            WT_ERR(__ckpt_update(session, block, ckptbase, ckpt, ckpt->bpriv));
+            WT_ERR(__ckpt_update(session, block, ckptbase, ckpt, (WT_BLOCK_CKPT *)ckpt->bpriv));
 
 live_update:
     /* Truncate the file if that's possible. */
@@ -883,7 +884,7 @@ live_update:
     WT_CKPT_FOREACH (ckptbase, ckpt)
         if (!F_ISSET(ckpt, WT_CKPT_DELETE))
             break;
-    if ((a = ckpt->bpriv) == NULL)
+    if ((a = (WT_BLOCK_CKPT *)ckpt->bpriv) == NULL)
         a = &block->live;
     if (a->discard.entries != 0)
         WT_ERR_MSG(
@@ -900,7 +901,7 @@ err:
 
     /* Discard any checkpoint information we loaded. */
     WT_CKPT_FOREACH (ckptbase, ckpt)
-        if ((ci = ckpt->bpriv) != NULL)
+        if ((ci = (WT_BLOCK_CKPT *)ckpt->bpriv) != NULL)
             __wti_block_ckpt_destroy(session, ci);
 
     return (ret);
@@ -945,7 +946,7 @@ __ckpt_update(
          * Copy the INCOMPLETE checkpoint information into the checkpoint.
          */
         WT_RET(__wt_buf_init(session, &ckpt->raw, WT_BLOCK_CHECKPOINT_BUFFER));
-        endp = ckpt->raw.mem;
+        endp = (uint8_t *)ckpt->raw.mem;
         WT_RET(__wti_block_ckpt_pack(session, block, &endp, ci, true));
         ckpt->raw.size = WT_PTRDIFF(endp, ckpt->raw.mem);
 
@@ -1014,12 +1015,13 @@ __ckpt_update(
 
     /* Copy the COMPLETE checkpoint information into the checkpoint. */
     WT_RET(__wt_buf_init(session, &ckpt->raw, WT_BLOCK_CHECKPOINT_BUFFER));
-    endp = ckpt->raw.mem;
+    endp = (uint8_t *)ckpt->raw.mem;
     WT_RET(__wti_block_ckpt_pack(session, block, &endp, ci, false));
     ckpt->raw.size = WT_PTRDIFF(endp, ckpt->raw.mem);
 
     if (WT_VERBOSE_LEVEL_ISSET(session, WT_VERB_CHECKPOINT, WT_VERBOSE_DEBUG_2))
-        __wti_ckpt_verbose(session, block, "create", ckpt->name, ckpt->raw.data, ckpt->raw.size);
+        __wti_ckpt_verbose(session, block, "create", ckpt->name,
+          (const uint8_t *)ckpt->raw.data, ckpt->raw.size);
 
     return (0);
 }
@@ -1103,11 +1105,11 @@ __wti_block_checkpoint_extlist_dump(WT_SESSION_IMPL *session, WT_BLOCK *block)
       session, session->dhandle->name, false, &ckptbase, &ckpt_bytes_allocated));
     WT_CKPT_FOREACH (ckptbase, ckpt_iter) {
         WT_ERR(__wt_calloc(session, 1, sizeof(WT_BLOCK_CKPT), &ckpt_iter->bpriv));
-        ci = ckpt_iter->bpriv;
+        ci = (WT_BLOCK_CKPT *)ckpt_iter->bpriv;
 
         WT_ERR(__wti_block_ckpt_init(session, ci, ckpt_iter->name));
-        WT_ERR(
-          __wti_block_ckpt_unpack(session, block, ckpt_iter->raw.data, ckpt_iter->raw.size, ci));
+        WT_ERR(__wti_block_ckpt_unpack(session, block, (const uint8_t *)ckpt_iter->raw.data,
+          ckpt_iter->raw.size, ci));
 
         if (ci->alloc.offset != WT_BLOCK_INVALID_OFFSET &&
           __wti_block_extlist_read(session, block, &ci->alloc, ci->file_size) == 0)
@@ -1127,7 +1129,7 @@ __wti_block_checkpoint_extlist_dump(WT_SESSION_IMPL *session, WT_BLOCK *block)
 err:
     /* Discard any checkpoint information we loaded. */
     WT_CKPT_FOREACH (ckptbase, ckpt_iter)
-        if ((ci = ckpt_iter->bpriv) != NULL)
+        if ((ci = (WT_BLOCK_CKPT *)ckpt_iter->bpriv) != NULL)
             __wti_block_ckpt_destroy(session, ci);
 
     __wt_ckptlist_free(session, &ckptbase);

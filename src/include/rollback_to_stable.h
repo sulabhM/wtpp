@@ -61,10 +61,19 @@
       (txnid) >= S2C(session)->recovery_ckpt_snap_min)
 
 /* Enable rollback to stable verbose messaging during recovery. */
+#ifdef __cplusplus
+/* C++: use named arrays (no compound literal address). */
+static const WT_VERBOSE_CATEGORY rts_verbose_recovery_rts[] = {WT_VERB_RECOVERY, WT_VERB_RTS};
+static const WT_VERBOSE_CATEGORY rts_verbose_rts[] = {WT_VERB_RTS};
+#define WT_VERB_RECOVERY_RTS(session)                                                       \
+    (F_ISSET(S2C(session), WT_CONN_RECOVERING) ? WT_DECL_VERBOSE_MULTI_CATEGORY(rts_verbose_recovery_rts) : \
+        WT_DECL_VERBOSE_MULTI_CATEGORY(rts_verbose_rts))
+#else
 #define WT_VERB_RECOVERY_RTS(session)                                                              \
     (F_ISSET(S2C(session), WT_CONN_RECOVERING) ?                                                   \
         WT_DECL_VERBOSE_MULTI_CATEGORY(((WT_VERBOSE_CATEGORY[]){WT_VERB_RECOVERY, WT_VERB_RTS})) : \
         WT_DECL_VERBOSE_MULTI_CATEGORY(((WT_VERBOSE_CATEGORY[]){WT_VERB_RTS})))
+#endif
 
 /* Increment a connection stat, or the dry-run version if needed. */
 #define WT_RTS_STAT_CONN_INCR(session, stat)           \

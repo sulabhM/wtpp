@@ -202,7 +202,7 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
         if (block_meta != NULL)
             *block_meta = block_meta_tmp;
 
-        dsk = ip->data;
+        dsk = (const WT_PAGE_HEADER *)ip->data;
 
         /*
          * Disallow reading an unencrypted block from original source when encryption is configured.
@@ -234,7 +234,7 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
      * If the block is encrypted, copy the skipped bytes of the image into place, then decrypt. DRAM
      * block-cache blocks are never encrypted.
      */
-    dsk = ip->data;
+    dsk = (const WT_PAGE_HEADER *)ip->data;
     ip_orig = ip;
     if (F_ISSET(dsk, WT_PAGE_ENCRYPTED)) {
         WT_ERR(__wt_scr_alloc(session, 0, &etmp));
@@ -257,7 +257,7 @@ __wt_blkcache_read(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *b
           session, cache_item, NULL, 0, &block_meta_tmp, addr, addr_size, false));
     }
 
-    dsk = ip->data;
+    dsk = (const WT_PAGE_HEADER *)ip->data;
     if (F_ISSET(dsk, WT_PAGE_COMPRESSED)) {
         if (compressor == NULL || compressor->decompress == NULL) {
             ret = __blkcache_read_corrupt(session, WT_ERROR, addr, addr_size,
@@ -323,7 +323,7 @@ verify:
         if (tmp == NULL)
             WT_ERR(__wt_scr_alloc(session, 4 * 1024, &tmp));
         WT_ERR(bm->addr_string(bm, session, tmp, addr, addr_size));
-        WT_ERR(__wt_verify_dsk(session, tmp->data, buf));
+        WT_ERR(__wt_verify_dsk(session, (const char *)tmp->data, buf));
     }
 
 err:
@@ -464,7 +464,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
                 block_meta_tmp = *blkcache_item->block_meta;
 
             ip = &results[0];
-            dsk = ip->data;
+            dsk = (const WT_PAGE_HEADER *)ip->data;
             type = dsk->type;
         }
     }
@@ -489,7 +489,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
          * In this case, the encryption/compression flags live in the page header.
          */
         ip = &results[0];
-        dsk = ip->data;
+        dsk = (const WT_PAGE_HEADER *)ip->data;
         type = dsk->type;
 
         /*
@@ -539,7 +539,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
      * sections, possibly without a second item for the decompression. But that's a problem for
      * later.
      */
-    dsk = ip->data;
+    dsk = (const WT_PAGE_HEADER *)ip->data;
     if (F_ISSET(dsk, WT_PAGE_COMPRESSED)) {
         WT_ERR(__wt_scr_alloc(session, 0, &ctmp));
         WT_ERR(__read_decompress(session, dsk, dsk->mem_size, ctmp, addr, addr_size));
@@ -576,7 +576,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
     for (i = 1; i < count; i++) {
         ip = &results[i];
 
-        blk = WT_BLOCK_HEADER_REF(results[i].data);
+        blk = (WT_BLOCK_DISAGG_HEADER *)WT_BLOCK_HEADER_REF(results[i].data);
 
         /*
          * For each delta, increment statistics before we do any more processing such as
@@ -593,7 +593,7 @@ __wt_blkcache_read_multi(WT_SESSION_IMPL *session, WT_ITEM **buf, size_t *buf_co
             ip = etmp;
         }
         if (F_ISSET(blk, WT_BLOCK_DISAGG_COMPRESSED)) {
-            dsk = ip->data;
+            dsk = (const WT_PAGE_HEADER *)ip->data;
             WT_ERR(__wt_scr_alloc(session, 0, &ctmp));
             WT_ERR(__read_decompress(session, ip->data, dsk->mem_size, ctmp, addr, addr_size));
             ip = ctmp;
@@ -741,7 +741,7 @@ __wt_blkcache_write(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *
             ip = ctmp;
 
             /* Set the disk header flags. */
-            dsk = ip->mem;
+            dsk = (WT_PAGE_HEADER *)ip->mem;
             F_SET(dsk, WT_PAGE_COMPRESSED);
 
             /* Optionally return the compressed size. */
@@ -769,7 +769,7 @@ __wt_blkcache_write(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *
         ip = etmp;
 
         /* Set the disk header flags. */
-        dsk = ip->mem;
+        dsk = (WT_PAGE_HEADER *)ip->mem;
         if (compressed)
             F_SET(dsk, WT_PAGE_COMPRESSED);
         F_SET(dsk, WT_PAGE_ENCRYPTED);
@@ -811,7 +811,7 @@ __wt_blkcache_write(WT_SESSION_IMPL *session, WT_ITEM *buf, WT_PAGE_BLOCK_META *
      * images that are created during recovery may have the write generation number less than the
      * btree base write generation number, so don't verify it.
      */
-    dsk = ip->mem;
+    dsk = (WT_PAGE_HEADER *)ip->mem;
     WT_ASSERT(session, dsk->write_gen != 0);
     mem_size = dsk->mem_size;
 

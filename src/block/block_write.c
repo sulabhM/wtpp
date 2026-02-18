@@ -391,9 +391,9 @@ __wti_block_write_off(WT_SESSION_IMPL *session, WT_BLOCK *block, WT_ITEM *buf, w
      * place to catch all callers. After the write, swap values back to native order so callers
      * never see anything other than their original content.
      */
-    __wt_page_header_byteswap(buf->mem);
+    __wt_page_header_byteswap((WT_PAGE_HEADER *)buf->mem);
     ret = __block_write_off(
       session, block, buf, offsetp, sizep, checksump, data_checksum, checkpoint_io, caller_locked);
-    __wt_page_header_byteswap(buf->mem);
+    __wt_page_header_byteswap((WT_PAGE_HEADER *)buf->mem);
     return (ret);
 }

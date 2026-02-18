@@ -38,17 +38,22 @@
           (tw)->durable_start_ts <= (r)->rec_start_pinned_ts)))
 
 /*
+ * Child modify state (file scope for C++ compatibility).
+ */
+typedef enum {
+    WTI_CHILD_IGNORE,   /* Ignored child */
+    WTI_CHILD_MODIFIED, /* Modified child */
+    WTI_CHILD_ORIGINAL, /* Original child */
+    WTI_CHILD_PROXY     /* Deleted child: proxy */
+} wti_child_modify_state;
+
+/*
  * WTI_CHILD_MODIFY_STATE --
  *	We review child pages (while holding the child page's WT_REF lock), during internal-page
  * reconciliation. This structure encapsulates the child page's returned information/state.
  */
 typedef struct {
-    enum {
-        WTI_CHILD_IGNORE,   /* Ignored child */
-        WTI_CHILD_MODIFIED, /* Modified child */
-        WTI_CHILD_ORIGINAL, /* Original child */
-        WTI_CHILD_PROXY     /* Deleted child: proxy */
-    } state;                /* Returned child state */
+    wti_child_modify_state state; /* Returned child state */
 
     WT_PAGE_DELETED del; /* WTI_CHILD_PROXY state fast-truncate information */
 
