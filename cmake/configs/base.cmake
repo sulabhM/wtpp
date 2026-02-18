@@ -171,6 +171,12 @@ config_bool(
 )
 
 config_bool(
+    WT_BUILD_AS_CPP
+    "Compile WiredTiger core sources as C++ (same .c files with C++ compiler). If OFF, compile as C."
+    DEFAULT OFF
+)
+
+config_bool(
     ENABLE_STRICT
     "Compile with strict compiler warnings enabled"
     DEFAULT ON

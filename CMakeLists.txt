@@ -141,6 +141,15 @@ add_subdirectory(ext)
 # Collect all the library sources we need to compile from the source filelist.
 parse_filelist_source(${CMAKE_CURRENT_LIST_DIR}/dist/filelist wt_sources)
 
+# When building as C++, treat .c sources as C++ (keep ASM files as-is).
+if(WT_BUILD_AS_CPP)
+    foreach(f ${wt_sources})
+        get_filename_component(ext ${f} EXT)
+        if(ext STREQUAL ".c")
+            set_source_files_properties(${f} PROPERTIES LANGUAGE CXX)
+        endif()
+    endforeach()
+endif()
 
 if(WT_WIN)
     list(APPEND wt_source ${CMAKE_SOURCE_DIR}/cmake/configs/wiredtiger.def)
@@ -178,6 +187,8 @@ endif()
 
 # Generate wiredtiger.h include file.
 configure_file(src/include/wiredtiger.h.in "include/wiredtiger.h" @ONLY)
+# Set WT_CPP_BUILD for config header when building core as C++.
+set(WT_CPP_BUILD ${WT_BUILD_AS_CPP})
 # Generate our wiredtiger_config.h include file.
 configure_file(cmake/configs/wiredtiger_config.h.in "config/wiredtiger_config.h" @ONLY)
 
@@ -193,9 +204,20 @@ if(WITH_PIC OR ENABLE_SHARED)
         ${CMAKE_CURRENT_BINARY_DIR}/config
         ${CMAKE_CURRENT_LIST_DIR}/src/include
     )
-    # Append any provided C flags.
-    if(COMPILER_DIAGNOSTIC_C_FLAGS)
-        target_compile_options(wt_objs PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS})
+    if(WT_BUILD_AS_CPP)
+        set_target_properties(wt_objs PROPERTIES
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+        )
+        if(COMPILER_DIAGNOSTIC_CXX_FLAGS)
+            target_compile_options(wt_objs PRIVATE ${COMPILER_DIAGNOSTIC_CXX_FLAGS})
+        endif()
+    else()
+        # Append any provided C flags.
+        if(COMPILER_DIAGNOSTIC_C_FLAGS)
+            target_compile_options(wt_objs PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS})
+        endif()
     endif()
     if(ENABLE_MEMKIND)
         target_include_directories(wt_objs PRIVATE ${HAVE_LIBMEMKIND_INCLUDES})

@@ -32,9 +32,15 @@ macro(define_wiredtiger_library target type)
     if(DEFINE_WT_PRIVATE_INCLUDES)
         target_include_directories(${target} PRIVATE ${DEFINE_WT_PRIVATE_INCLUDES})
     endif()
-    # Append any provided C flags.
-    if(COMPILER_DIAGNOSTIC_C_FLAGS)
-        target_compile_options(${target} PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS})
+    if(WT_BUILD_AS_CPP)
+        if(COMPILER_DIAGNOSTIC_CXX_FLAGS)
+            target_compile_options(${target} PRIVATE ${COMPILER_DIAGNOSTIC_CXX_FLAGS})
+        endif()
+    else()
+        # Append any provided C flags.
+        if(COMPILER_DIAGNOSTIC_C_FLAGS)
+            target_compile_options(${target} PRIVATE ${COMPILER_DIAGNOSTIC_C_FLAGS})
+        endif()
     endif()
 
     # We want to set the following target properties:
@@ -43,12 +49,23 @@ macro(define_wiredtiger_library target type)
     #   of a 'SHARED' wiredtiger library would conflict.
     # NO_SYSTEM_FROM_IMPORTED - don't treat include interface directories consumed on an imported target as system
     #   directories.
-    # C_STANDARD - require C11 from the compiler.
-    set_target_properties(${target} PROPERTIES
-        OUTPUT_NAME "wiredtiger"
-        NO_SYSTEM_FROM_IMPORTED TRUE
-        C_STANDARD 11
-    )
+    # C_STANDARD / CXX_STANDARD - require C11 or C++17 depending on WT_BUILD_AS_CPP.
+    if(WT_BUILD_AS_CPP)
+        set_target_properties(${target} PROPERTIES
+            OUTPUT_NAME "wiredtiger"
+            NO_SYSTEM_FROM_IMPORTED TRUE
+            CXX_STANDARD 17
+            CXX_STANDARD_REQUIRED ON
+            CXX_EXTENSIONS OFF
+            LINKER_LANGUAGE CXX
+        )
+    else()
+        set_target_properties(${target} PROPERTIES
+            OUTPUT_NAME "wiredtiger"
+            NO_SYSTEM_FROM_IMPORTED TRUE
+            C_STANDARD 11
+        )
+    endif()
 
     # Ensure we link any available library dependencies to our wiredtiger target.
     if(HAVE_LIBPTHREAD)
